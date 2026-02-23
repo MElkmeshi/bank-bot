@@ -29,27 +29,27 @@ class BotKernel
 
         $bot->onCommand('balance', $balanceHandler);
 
-        $bot->onCallbackQueryData('balance_view:*', function (Nutgram $bot) use ($balanceHandler) {
+        $bot->onCallbackQueryData('balance_view:{data}', function (Nutgram $bot) use ($balanceHandler) {
             $balanceHandler->handleAccountView($bot);
         });
 
-        $bot->onCallbackQueryData('balance_set_default:*', function (Nutgram $bot) use ($balanceHandler) {
+        $bot->onCallbackQueryData('balance_set_default:{data}', function (Nutgram $bot) use ($balanceHandler) {
             $balanceHandler->handleSetDefault($bot);
         });
 
         $bot->onCommand('transactions', $transactionsHandler);
 
-        $bot->onCallbackQueryData('transactions_view:*', function (Nutgram $bot) use ($transactionsHandler) {
+        $bot->onCallbackQueryData('transactions_view:{data}', function (Nutgram $bot) use ($transactionsHandler) {
             $transactionsHandler->handleAccountView($bot);
         });
 
         $bot->onCommand('delete_device', $deleteDeviceHandler);
 
-        $bot->onCallbackQueryData('delete_device_confirm:*', function (Nutgram $bot) use ($deleteDeviceHandler) {
+        $bot->onCallbackQueryData('delete_device_confirm:{data}', function (Nutgram $bot) use ($deleteDeviceHandler) {
             $deleteDeviceHandler->handleConfirm($bot);
         });
 
-        $bot->onCallbackQueryData('delete_device_cancel:*', function (Nutgram $bot) use ($deleteDeviceHandler) {
+        $bot->onCallbackQueryData('delete_device_cancel:{data}', function (Nutgram $bot) use ($deleteDeviceHandler) {
             $deleteDeviceHandler->handleCancel($bot);
         });
 
