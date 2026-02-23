@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__laravel-boost__application-info",
+      "Bash(composer require:*)",
+      "mcp__laravel-boost__search-docs",
+      "Bash(php artisan:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "laravel-boost",
+    "herd"
+  ]
+}
