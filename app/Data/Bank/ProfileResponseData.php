@@ -2,15 +2,15 @@
 
 namespace App\Data\Bank;
 
-use Spatie\LaravelData\Attributes\DataCollectionOf;
 use Spatie\LaravelData\Data;
-use Spatie\LaravelData\DataCollection;
 
 class ProfileResponseData extends Data
 {
     public function __construct(
-        /** @var AccountData[] */
-        #[DataCollectionOf(AccountData::class)]
-        public DataCollection $accounts,
+        public string $customer_id,
+        public string $customer_name,
+        public ?string $phone_number = null,
+        public ?string $email = null,
+        public ?string $national_id = null,
     ) {}
 }

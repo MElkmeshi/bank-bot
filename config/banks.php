@@ -13,8 +13,8 @@ return [
         'name' => 'Nuran Bank',
         'base_url' => env('NURAN_BASE_URL'),
         'telegram_token' => env('NURAN_TELEGRAM_TOKEN'),
-        'firebase_project' => env('NURAN_FIREBASE_PROJECT'),
-        'firebase_api_key' => env('NURAN_FIREBASE_API_KEY'),
-        'firebase_app_id' => env('NURAN_FIREBASE_APP_ID'),
+        'firebase_project' => env('NURAN_FIREBASE_PROJECT', 'nuran-prod'),
+        'firebase_api_key' => env('NURAN_FIREBASE_API_KEY', 'AIzaSyCpfkJOx099Qk9yg9hb-tQPQM-ATnohBfU'),
+        'firebase_app_id' => env('NURAN_FIREBASE_APP_ID', '1:900819939534:android:3ef1ece59785a256aca09f'),
     ],
 ];
