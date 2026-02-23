@@ -102,7 +102,7 @@ class BankApiService
             'N-Build-Number' => '135',
             'N-App-Version' => '1.0.35',
             'N-Platform' => 'ios',
-            'N-Device-Model' => 'iPhone 16e',
+            'N-Device-Model' => 'Telegram Bot',
             'N-Firebase-ID' => $this->deviceId,
             'N-Device-ID' => $this->deviceId,
         ];
