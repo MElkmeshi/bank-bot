@@ -5,6 +5,7 @@ namespace App\Telegram;
 use App\Enums\Bank;
 use App\Services\FirebaseService;
 use App\Telegram\Conversations\RegisterConversation;
+use App\Telegram\Conversations\TransferConversation;
 use App\Telegram\Handlers\BalanceHandler;
 use App\Telegram\Handlers\DeleteDeviceHandler;
 use App\Telegram\Handlers\TransactionsHandler;
@@ -20,6 +21,7 @@ class BotKernel
         $transactionsHandler = new TransactionsHandler($bank);
 
         $bot->getContainer()->bind(RegisterConversation::class, fn () => new RegisterConversation($bank, $firebaseService));
+        $bot->getContainer()->bind(TransferConversation::class, fn () => new TransferConversation($bank));
 
         $bot->onCommand('start', function (Nutgram $bot) {
             RegisterConversation::begin($bot);
@@ -51,12 +53,17 @@ class BotKernel
             $deleteDeviceHandler->handleCancel($bot);
         });
 
+        $bot->onCommand('transfer', function (Nutgram $bot) {
+            TransferConversation::begin($bot);
+        });
+
         $bot->fallback(function (Nutgram $bot) {
             $bot->sendMessage(
                 "I don't understand that. Available commands:\n"
                 ."/start - Register or login\n"
                 ."/balance - Check your account balance\n"
                 ."/transactions - View recent transactions\n"
+                ."/transfer - Send a bank transfer\n"
                 .'/delete_device - Remove this device'
             );
         });

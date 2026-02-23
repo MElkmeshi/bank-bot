@@ -221,6 +221,7 @@ class RegisterConversation extends Conversation
                 ."Available commands:\n"
                 ."/balance - Check your account balance\n"
                 ."/transactions - View recent transactions\n"
+                ."/transfer - Send a bank transfer\n"
                 .'/delete_device - Remove this device'
             );
 

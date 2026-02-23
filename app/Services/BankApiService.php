@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Data\Bank\AccountData;
+use App\Data\Bank\ContactData;
 use App\Data\Bank\DeleteDeviceRequestData;
+use App\Data\Bank\InitiateTransferResponseData;
 use App\Data\Bank\ProfileResponseData;
 use App\Data\Bank\RefreshTokenResponseData;
 use App\Data\Bank\RegisterRequestData;
@@ -79,6 +81,70 @@ class BankApiService
         ]);
 
         $response = $this->client()->delete('/devices/delete', $data->toArray());
+
+        $response->throw();
+    }
+
+    /** @return DataCollection<int, ContactData> */
+    public function getContacts(): DataCollection
+    {
+        $response = $this->client()->get('/contacts');
+
+        $response->throw();
+
+        return ContactData::collect($response->json('data'), DataCollection::class);
+    }
+
+    public function createContact(string $name, string $iban): ContactData
+    {
+        $response = $this->client()->post('/contacts', [
+            'name' => $name,
+            'identification' => $iban,
+            'schema' => 'iban',
+            'type' => 'external',
+        ]);
+
+        $response->throw();
+
+        return ContactData::from($response->json('data'));
+    }
+
+    public function initiateTransfer(
+        string $debtorAccountNumber,
+        string $iban,
+        string $amount,
+        string $currency,
+        ?string $description = null,
+    ): InitiateTransferResponseData {
+        $response = $this->client()->post('/transfers/lypay/initiate', [
+            'debtor_account_number' => $debtorAccountNumber,
+            'identification' => $iban,
+            'schema' => 'iban',
+            'amount' => $amount,
+            'currency' => $currency,
+            'description' => $description,
+        ]);
+
+        $response->throw();
+
+        return InitiateTransferResponseData::from($response->json('data'));
+    }
+
+    public function confirmTransfer(
+        string $transactionId,
+        ?string $customerId = null,
+        ?string $verificationReference = null,
+        ?string $verificationCode = null,
+    ): void {
+        $body = [];
+
+        if ($customerId !== null) {
+            $body['customer_id'] = $customerId;
+            $body['verification_reference'] = $verificationReference;
+            $body['verification_code'] = $verificationCode;
+        }
+
+        $response = $this->client()->post("/transfers/lypay/{$transactionId}/confirm", $body);
 
         $response->throw();
     }
