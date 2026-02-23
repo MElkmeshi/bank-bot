@@ -220,6 +220,7 @@ class RegisterConversation extends Conversation
                 "✅ Registration successful! Welcome, {$verifyResponse->customer->name}!\n\n"
                 ."Available commands:\n"
                 ."/balance - Check your account balance\n"
+                ."/transactions - View recent transactions\n"
                 .'/delete_device - Remove this device'
             );
 

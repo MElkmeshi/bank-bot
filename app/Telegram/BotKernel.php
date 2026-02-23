@@ -7,6 +7,7 @@ use App\Services\FirebaseService;
 use App\Telegram\Conversations\RegisterConversation;
 use App\Telegram\Handlers\BalanceHandler;
 use App\Telegram\Handlers\DeleteDeviceHandler;
+use App\Telegram\Handlers\TransactionsHandler;
 use SergiX44\Nutgram\Nutgram;
 
 class BotKernel
@@ -16,6 +17,7 @@ class BotKernel
         $firebaseService = new FirebaseService;
         $balanceHandler = new BalanceHandler($bank);
         $deleteDeviceHandler = new DeleteDeviceHandler($bank);
+        $transactionsHandler = new TransactionsHandler($bank);
 
         $bot->getContainer()->bind(RegisterConversation::class, fn () => new RegisterConversation($bank, $firebaseService));
 
@@ -33,6 +35,12 @@ class BotKernel
             $balanceHandler->handleSetDefault($bot);
         });
 
+        $bot->onCommand('transactions', $transactionsHandler);
+
+        $bot->onCallbackQueryData('transactions_view:*', function (Nutgram $bot) use ($transactionsHandler) {
+            $transactionsHandler->handleAccountView($bot);
+        });
+
         $bot->onCommand('delete_device', $deleteDeviceHandler);
 
         $bot->onCallbackQueryData('delete_device_confirm:*', function (Nutgram $bot) use ($deleteDeviceHandler) {
@@ -48,6 +56,7 @@ class BotKernel
                 "I don't understand that. Available commands:\n"
                 ."/start - Register or login\n"
                 ."/balance - Check your account balance\n"
+                ."/transactions - View recent transactions\n"
                 .'/delete_device - Remove this device'
             );
         });
