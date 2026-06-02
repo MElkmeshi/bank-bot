@@ -108,8 +108,8 @@ class CheckTransactionsJob implements ShouldQueue
                 'transaction_date' => Carbon::parse($txData->date),
             ]);
 
-            // Only notify for INIT events (not reversals) and recent transactions
-            if ($txData->event === 'INIT' && Carbon::parse($txData->date)->isAfter(now()->subHour())) {
+            // Notify for all events except reversals, and only for recent transactions
+            if (Carbon::parse($txData->date)->isAfter(now()->subHour())) {
                 Log::info("CheckTransactionsJob: sending notification for transaction {$transaction->id}");
                 $this->sendNotification($session, $transaction);
             } else {
