@@ -23,6 +23,8 @@ class CheckTransactionsJob implements ShouldQueue
             ->whereNotNull('refresh_token')
             ->get();
 
+        Log::info('CheckTransactionsJob: started', ['session_count' => $sessions->count()]);
+
         foreach ($sessions as $session) {
             try {
                 $this->procesSession($session);
@@ -32,16 +34,27 @@ class CheckTransactionsJob implements ShouldQueue
                 ]);
             }
         }
+
+        Log::info('CheckTransactionsJob: finished');
     }
 
     private function procesSession(BankSession $session): void
     {
+        Log::info("CheckTransactionsJob: processing session {$session->id}", [
+            'bank' => $session->bank->value,
+            'chat_id' => $session->telegram_chat_id,
+        ]);
+
         if (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded()) {
+            Log::warning("CheckTransactionsJob: session {$session->id} is not authenticated and could not refresh token, skipping");
+
             return;
         }
 
         $apiService = new BankApiService($session->bank, $session->device_id, $session->access_token);
         $accounts = $apiService->getAccounts();
+
+        Log::info("CheckTransactionsJob: session {$session->id} has {$accounts->count()} account(s)");
 
         foreach ($accounts as $account) {
             $this->processAccount($session, $apiService, $account->number);
@@ -50,7 +63,11 @@ class CheckTransactionsJob implements ShouldQueue
 
     private function processAccount(BankSession $session, BankApiService $apiService, string $accountNumber): void
     {
+        Log::info("CheckTransactionsJob: checking account {$accountNumber} for session {$session->id}");
+
         $transactions = $apiService->getTransactions($accountNumber);
+
+        Log::info("CheckTransactionsJob: fetched {$transactions->count()} transaction(s) for account {$accountNumber}");
 
         foreach ($transactions as $txData) {
             $isNew = ! Transaction::where('bank_session_id', $session->id)
@@ -61,8 +78,17 @@ class CheckTransactionsJob implements ShouldQueue
                 ->exists();
 
             if (! $isNew) {
+                Log::debug("CheckTransactionsJob: transaction {$txData->reference} already exists, skipping");
+
                 continue;
             }
+
+            Log::info('CheckTransactionsJob: new transaction found', [
+                'reference' => $txData->reference,
+                'type' => $txData->type,
+                'event' => $txData->event,
+                'amount' => $txData->amount_formatted,
+            ]);
 
             $transaction = Transaction::create([
                 'bank_session_id' => $session->id,
@@ -84,7 +110,13 @@ class CheckTransactionsJob implements ShouldQueue
 
             // Only notify for INIT events (not reversals) and recent transactions
             if ($txData->event === 'INIT' && Carbon::parse($txData->date)->isAfter(now()->subHour())) {
+                Log::info("CheckTransactionsJob: sending notification for transaction {$transaction->id}");
                 $this->sendNotification($session, $transaction);
+            } else {
+                Log::info("CheckTransactionsJob: skipping notification for transaction {$transaction->id}", [
+                    'event' => $txData->event,
+                    'date' => $txData->date,
+                ]);
             }
         }
     }
@@ -94,6 +126,8 @@ class CheckTransactionsJob implements ShouldQueue
         $token = $session->bank->config('telegram_token');
 
         if (empty($token)) {
+            Log::warning("CheckTransactionsJob: no telegram token configured for bank {$session->bank->value}, skipping notification");
+
             return;
         }
 
@@ -120,6 +154,7 @@ class CheckTransactionsJob implements ShouldQueue
             ]);
 
             $transaction->update(['notified_at' => now()]);
+            Log::info("CheckTransactionsJob: notification sent for transaction {$transaction->id}");
         } catch (\Throwable $e) {
             Log::error("CheckTransactionsJob: failed to send notification for transaction {$transaction->id}", [
                 'error' => $e->getMessage(),
