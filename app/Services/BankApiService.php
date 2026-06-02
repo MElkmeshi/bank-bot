@@ -73,6 +73,15 @@ class BankApiService
         return TransactionData::collect($response->json('data'), DataCollection::class);
     }
 
+    public function getRawTransactions(string $accountNumber): mixed
+    {
+        $response = $this->client()->get("/accounts/{$accountNumber}/transactions");
+
+        $response->throw();
+
+        return $response->json();
+    }
+
     public function deleteDevice(string $customerId): void
     {
         $data = DeleteDeviceRequestData::from([
