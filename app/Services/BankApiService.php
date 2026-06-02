@@ -166,7 +166,7 @@ class BankApiService
             'Content-Type' => 'application/json',
             'N-Language' => 'ar',
             'N-Build-Number' => '135',
-            'N-App-Version' => '1.0.35',
+            'N-App-Version' => '1.1.0',
             'N-Platform' => 'ios',
             'N-Device-Model' => 'Telegram Bot',
             'N-Firebase-ID' => $this->deviceId,

@@ -17,10 +17,6 @@ class RegisterConversation extends Conversation
 {
     private string $customerId = '';
 
-    private string $nationalId = '';
-
-    private string $phoneNumber = '';
-
     private string $password = '';
 
     public function __construct(
@@ -34,8 +30,6 @@ class RegisterConversation extends Conversation
             'bank' => $this->bank,
             'firebaseService' => $this->firebaseService,
             'customerId' => $this->customerId,
-            'nationalId' => $this->nationalId,
-            'phoneNumber' => $this->phoneNumber,
             'password' => $this->password,
         ];
     }
@@ -45,8 +39,6 @@ class RegisterConversation extends Conversation
         $this->bank = $data['bank'] ?? Bank::Andalus;
         $this->firebaseService = $data['firebaseService'] ?? new FirebaseService;
         $this->customerId = $data['customerId'] ?? '';
-        $this->nationalId = $data['nationalId'] ?? '';
-        $this->phoneNumber = $data['phoneNumber'] ?? '';
         $this->password = $data['password'] ?? '';
 
         // Restore parent private properties via closure binding
@@ -78,43 +70,15 @@ class RegisterConversation extends Conversation
         }
 
         $bot->sendMessage("Welcome to {$this->bank->displayName()} bot!\n\nPlease enter your Customer ID:");
-        $this->next('askNationalId');
-    }
-
-    public function askNationalId(Nutgram $bot): void
-    {
-        $this->customerId = trim($bot->message()->text ?? '');
-
-        if (empty($this->customerId)) {
-            $bot->sendMessage('Customer ID cannot be empty. Please enter your Customer ID:');
-
-            return;
-        }
-
-        $bot->sendMessage('Please enter your National ID:');
-        $this->next('askPhone');
-    }
-
-    public function askPhone(Nutgram $bot): void
-    {
-        $this->nationalId = trim($bot->message()->text ?? '');
-
-        if (empty($this->nationalId)) {
-            $bot->sendMessage('National ID cannot be empty. Please enter your National ID:');
-
-            return;
-        }
-
-        $bot->sendMessage('Please enter your Phone Number:');
         $this->next('askPassword');
     }
 
     public function askPassword(Nutgram $bot): void
     {
-        $this->phoneNumber = trim($bot->message()->text ?? '');
+        $this->customerId = trim($bot->message()->text ?? '');
 
-        if (empty($this->phoneNumber)) {
-            $bot->sendMessage('Phone number cannot be empty. Please enter your Phone Number:');
+        if (empty($this->customerId)) {
+            $bot->sendMessage('Customer ID cannot be empty. Please enter your Customer ID:');
 
             return;
         }
@@ -140,8 +104,6 @@ class RegisterConversation extends Conversation
 
             $registerData = RegisterRequestData::from([
                 'customer_id' => $this->customerId,
-                'national_id' => $this->nationalId,
-                'phone_number' => $this->phoneNumber,
                 'device_id' => $deviceId,
                 'password' => $this->password,
             ]);
