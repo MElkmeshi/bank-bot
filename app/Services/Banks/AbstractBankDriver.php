@@ -58,7 +58,11 @@ abstract class AbstractBankDriver implements BankDriver
     {
         $client = Http::baseUrl($this->bank->config('base_url'))
             ->acceptJson()
-            ->withOptions(['verify' => (bool) $this->bank->config('verify_ssl', true)]);
+            ->timeout((int) $this->bank->config('timeout', 30))
+            ->withOptions(array_filter([
+                'verify' => (bool) $this->bank->config('verify_ssl', true),
+                'proxy' => $this->bank->config('proxy'),
+            ], fn (mixed $option) => $option !== null && $option !== ''));
 
         $userAgent = $this->bank->config('user_agent');
 

@@ -11,6 +11,10 @@ return [
     | The "driver" decides which App\Services\Banks\Drivers class handles the
     | bank's API; banks that share a banking platform share a driver.
     |
+    | Optional per bank: "proxy" (e.g. socks5h://127.0.0.1:1080) routes that
+    | bank's API traffic through a proxy, for banks that only accept Libyan
+    | IPs; "timeout" is the request timeout in seconds.
+    |
     */
 
     'banks' => [
@@ -25,6 +29,7 @@ return [
             'firebase_app_id' => env('ANDALUS_FIREBASE_APP_ID', '1:347355877973:android:36daefa0fe356193c8badc'),
             'build_number' => env('ANDALUS_BUILD_NUMBER', '300'),
             'app_version' => env('ANDALUS_APP_VERSION', '1.2.5'),
+            'proxy' => env('ANDALUS_PROXY'),
         ],
 
         'nuran' => [
@@ -37,6 +42,7 @@ return [
             'firebase_app_id' => env('NURAN_FIREBASE_APP_ID', '1:900819939534:android:3ef1ece59785a256aca09f'),
             'build_number' => env('NURAN_BUILD_NUMBER', '300'),
             'app_version' => env('NURAN_APP_VERSION', '1.2.5'),
+            'proxy' => env('NURAN_PROXY'),
         ],
 
         'jumhouria' => [
@@ -50,6 +56,7 @@ return [
             'product_type' => env('JUMHOURIA_PRODUCT_TYPE', '100'),
             'user_agent' => env('JUMHOURIA_USER_AGENT', 'Dart/3.11 (dart:io)'),
             'verify_ssl' => env('JUMHOURIA_VERIFY_SSL', false),
+            'proxy' => env('JUMHOURIA_PROXY'),
         ],
 
         'nab' => [
@@ -60,6 +67,7 @@ return [
             'telegram_token' => env('NAB_TELEGRAM_TOKEN'),
             'user_agent' => env('NAB_USER_AGENT', 'Dart/3.10 (dart:io)'),
             'statement_days' => env('NAB_STATEMENT_DAYS', 7),
+            'proxy' => env('NAB_PROXY'),
         ],
 
     ],
