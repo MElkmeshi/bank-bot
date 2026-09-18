@@ -12,7 +12,8 @@ class ListBankRequestsCommand extends Command
         {--session= : Only requests made for this bank session ID}
         {--failed : Only failed requests (errors or HTTP >= 400)}
         {--limit=30 : Number of requests to show}
-        {--id= : Show one request in full, including headers and bodies}';
+        {--id= : Show one request in full, including headers and bodies}
+        {--curl : With --id, print only a curl command that replays the request}';
 
     protected $description = 'Browse the recorded HTTP requests made to the banks';
 
@@ -74,6 +75,12 @@ class ListBankRequestsCommand extends Command
             return self::FAILURE;
         }
 
+        if ($this->option('curl')) {
+            $this->line($request->toCurl());
+
+            return self::SUCCESS;
+        }
+
         $this->info("[{$request->id}] {$request->bank->value} · session {$request->bank_session_id} · {$request->created_at} · {$request->duration_ms} ms");
         $this->line("{$request->method} {$request->url}");
         $this->newLine();
@@ -86,6 +93,9 @@ class ListBankRequestsCommand extends Command
         $this->line(json_encode($request->response_headers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         $this->comment('Response body:');
         $this->line($this->pretty($request->response_body));
+        $this->newLine();
+        $this->comment('Replay:');
+        $this->line($request->toCurl());
 
         return self::SUCCESS;
     }

@@ -227,3 +227,35 @@ it('falls back to the raw body when the bank sends no message', function () {
     expect(fn () => BankSession::factory()->authenticated()->create()->driver()->accounts())
         ->toThrow(BankApiException::class, 'Andalus Bank responded with HTTP 502: <html>Bad Gateway</html>');
 });
+
+it('re-authenticates and retries once when the bank answers 401 before the token expired', function () {
+    Http::fake([
+        'andalus.test/api/v1/accounts' => Http::sequence()
+            ->push(['message' => 'Unauthenticated.'], 401)
+            ->push(['data' => [['number' => '1001', 'available_balance' => '1', 'available_balance_formatted' => '1 LYD', 'currency' => 'LYD']]]),
+        'andalus.test/api/v1/refresh-token' => Http::response(['data' => ['access_token' => 'renewed', 'access_token_expires_at' => now()->addHour()->timestamp]]),
+    ]);
+
+    $session = BankSession::factory()->authenticated()->create();
+
+    expect($session->driver()->accounts()->first()->number)->toBe('1001')
+        ->and($session->fresh()->access_token)->toBe('renewed');
+
+    Http::assertSentInOrder([
+        fn (Request $request) => str_ends_with($request->url(), '/accounts') && $request->hasHeader('Authorization', 'Bearer access-token'),
+        fn (Request $request) => str_ends_with($request->url(), '/refresh-token'),
+        fn (Request $request) => str_ends_with($request->url(), '/accounts') && $request->hasHeader('Authorization', 'Bearer renewed'),
+    ]);
+});
+
+it('gives up after one failed re-authentication', function () {
+    Http::fake([
+        'andalus.test/api/v1/accounts' => Http::response(['message' => 'Unauthenticated.'], 401),
+        'andalus.test/api/v1/refresh-token' => Http::response(['message' => 'Refresh token expired'], 401),
+    ]);
+
+    expect(fn () => BankSession::factory()->authenticated()->create()->driver()->accounts())
+        ->toThrow(BankApiException::class, 'HTTP 401: Unauthenticated.');
+
+    Http::assertSentCount(2);
+});

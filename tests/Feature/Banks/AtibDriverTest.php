@@ -251,3 +251,18 @@ it('buys a voucher through the MFA flow and returns the pin code', function () {
     Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/purchaseMNO')
         && (jsondata($request)['MFAAttributes']['OTP']['otp'] ?? null) === '537');
 });
+
+it('re-logs in and retries with the new claims token on a 401', function () {
+    Http::fake([
+        ATIB.'/services/data/v1/RBObjects/operations/Accounts/getAccountsPostLogin' => Http::sequence()
+            ->push('', 401)
+            ->push(['Accounts' => [atibAccount()], 'opstatus' => 0]),
+        ATIB.'/authService/100000002/login' => Http::response(['claims_token' => ['value' => 'anon-token']]),
+        ATIB.'/authService/100000002/login?provider=DbxUserLogin' => Http::response(['profile' => ['firstname' => 'M', 'lastname' => 'E'], 'claims_token' => ['value' => 'new-claims']]),
+        ATIB.'/services/data/v1/RBObjects/objects/User' => Http::response(['records' => [], 'opstatus' => 0]),
+    ]);
+
+    expect(atibSession()->driver()->accounts()->first()->number)->toBe('10000000850247');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/getAccountsPostLogin') && $request->hasHeader('X-Kony-Authorization', 'new-claims'));
+});

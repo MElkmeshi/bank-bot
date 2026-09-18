@@ -16,15 +16,13 @@ use Throwable;
 /**
  * Guzzle middleware that stores every request to a bank in bank_requests.
  *
- * Secret headers are redacted and credential fields in request bodies are
- * masked; everything else is kept verbatim (encrypted at rest) so a bank's
- * behaviour can be inspected later without re-capturing traffic.
+ * Credential fields in request bodies are masked; everything else, tokens
+ * included, is kept verbatim (encrypted at rest) so any request can be
+ * replayed with BankRequest::toCurl() without re-capturing traffic.
  */
 class BankRequestRecorder
 {
     private const REDACTED = '[redacted]';
-
-    private const SECRET_HEADERS = ['authorization', 'x-kony-authorization', 'x-kony-app-secret', 'x-goog-api-key', 'cookie', 'set-cookie'];
 
     private const SECRET_FIELDS = ['password', 'pin', 'newpin', 'secret'];
 
@@ -100,7 +98,7 @@ class BankRequestRecorder
         $headers = [];
 
         foreach ($message->getHeaders() as $name => $values) {
-            $headers[$name] = in_array(strtolower($name), self::SECRET_HEADERS, true) ? self::REDACTED : implode(', ', $values);
+            $headers[$name] = implode(', ', $values);
         }
 
         return $headers;

@@ -8,6 +8,7 @@ use App\Models\BankSession;
 use App\Services\Banks\Contracts\BankDriver;
 use App\Services\Banks\Support\BankRequestRecorder;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -76,6 +77,9 @@ abstract class AbstractBankDriver implements BankDriver
 
     /**
      * HTTP client carrying the session's current access token.
+     *
+     * A 401 (token revoked early, e.g. by a login from another device) triggers
+     * one silent re-authentication and a retry with the new token.
      */
     protected function authenticated(): PendingRequest
     {
@@ -83,7 +87,36 @@ abstract class AbstractBankDriver implements BankDriver
             throw new BankApiException('Session is not authenticated.');
         }
 
-        return $this->http()->withToken($this->session->access_token);
+        return $this->withAuthorization($this->http())
+            ->retry(2, 0, $this->retryAfterReauthentication(...), throw: false);
+    }
+
+    /**
+     * Attach the session's access token to a request. Override for banks that
+     * do not use a Bearer Authorization header.
+     */
+    protected function withAuthorization(PendingRequest $request): PendingRequest
+    {
+        return $request->withToken($this->session->access_token);
+    }
+
+    private function retryAfterReauthentication(Throwable $exception, PendingRequest $request): bool
+    {
+        if (! $exception instanceof RequestException || $exception->response->status() !== 401) {
+            return false;
+        }
+
+        try {
+            if (! $this->reauthenticate()) {
+                return false;
+            }
+        } catch (Throwable) {
+            return false;
+        }
+
+        $this->withAuthorization($request);
+
+        return true;
     }
 
     /**

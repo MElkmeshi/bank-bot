@@ -30,7 +30,8 @@ it('records every request a driver makes, with secrets redacted and bodies encry
         ->bank->toBe(Bank::Andalus)
         ->bank_session_id->toBeNull()
         ->status->toBe(200)
-        ->and($firebase->request_headers['x-goog-api-key'])->toBe('[redacted]')
+        ->and($firebase->request_headers['x-goog-api-key'])->toBe(config('banks.banks.andalus.firebase_api_key'))
+        ->and($firebase->getRawOriginal('request_headers'))->not->toContain('x-goog')
         ->and($register)
         ->bank_session_id->toBe($session->id)
         ->method->toBe('POST')
@@ -60,7 +61,7 @@ it('records failed responses and connection errors', function () {
 
     expect($unauthorized->status)->toBe(401)
         ->and($unauthorized->isSuccessful())->toBeFalse()
-        ->and($unauthorized->request_headers['Authorization'])->toBe('[redacted]')
+        ->and($unauthorized->request_headers['Authorization'])->toBe('Bearer access-token')
         ->and($timeout->status)->toBeNull()
         ->and($timeout->error)->toContain('cURL error 28');
 });
@@ -89,4 +90,20 @@ it('can be disabled and prunes old entries', function () {
     $this->artisan('model:prune', ['--model' => [BankRequest::class]])->assertSuccessful();
 
     expect(BankRequest::count())->toBe(1);
+});
+
+it('builds a replayable curl command', function () {
+    $request = BankRequest::create([
+        'bank' => 'nab', 'method' => 'POST', 'url' => 'https://nab.test/api/ips?x=1',
+        'request_headers' => ['Host' => 'nab.test', 'Content-Length' => '9', 'Authorization' => 'Bearer tok', 'Content-Type' => 'application/json'],
+        'request_body' => '{"description":"it\'s تجربة"}',
+        'created_at' => now(),
+    ]);
+
+    expect($request->toCurl())->toBe(
+        "curl -sk -X POST 'https://nab.test/api/ips?x=1' \\\n"
+        ."  -H 'Authorization: Bearer tok' \\\n"
+        ."  -H 'Content-Type: application/json' \\\n"
+        ."  --data-binary '{\"description\":\"it'\\''s تجربة\"}'"
+    );
 });

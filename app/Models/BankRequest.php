@@ -11,8 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * One HTTP exchange with a bank's API, kept for debugging and auditing.
  *
- * Bodies are stored encrypted; secret headers and credential fields are
- * redacted before storage by App\Services\Banks\Support\BankRequestRecorder.
+ * Headers and bodies are stored encrypted; credential fields in request
+ * bodies are masked by App\Services\Banks\Support\BankRequestRecorder.
  */
 class BankRequest extends Model
 {
@@ -39,8 +39,8 @@ class BankRequest extends Model
     {
         return [
             'bank' => Bank::class,
-            'request_headers' => 'array',
-            'response_headers' => 'array',
+            'request_headers' => 'encrypted:array',
+            'response_headers' => 'encrypted:array',
             'request_body' => 'encrypted',
             'response_body' => 'encrypted',
             'created_at' => 'datetime',
@@ -52,9 +52,36 @@ class BankRequest extends Model
         return $this->belongsTo(BankSession::class);
     }
 
+    /**
+     * A curl command that replays this request as it was sent.
+     */
+    public function toCurl(): string
+    {
+        $parts = ['curl -sk -X '.$this->method.' '.$this->shellQuote($this->url)];
+
+        foreach ($this->request_headers ?? [] as $name => $value) {
+            if (in_array(strtolower($name), ['host', 'content-length'], true)) {
+                continue;
+            }
+
+            $parts[] = '-H '.$this->shellQuote("{$name}: {$value}");
+        }
+
+        if ($this->request_body !== null && $this->request_body !== '') {
+            $parts[] = '--data-binary '.$this->shellQuote($this->request_body);
+        }
+
+        return implode(" \\\n  ", $parts);
+    }
+
     public function isSuccessful(): bool
     {
         return $this->error === null && $this->status !== null && $this->status < 400;
+    }
+
+    private function shellQuote(string $value): string
+    {
+        return "'".str_replace("'", "'\\''", $value)."'";
     }
 
     /** @return Builder<BankRequest> */

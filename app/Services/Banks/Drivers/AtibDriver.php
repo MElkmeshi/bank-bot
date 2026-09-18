@@ -515,10 +515,14 @@ class AtibDriver extends AbstractBankDriver implements SellsVouchers
         return $response;
     }
 
+    protected function withAuthorization(PendingRequest $request): PendingRequest
+    {
+        return $request->withHeaders(['X-Kony-Authorization' => $this->session->access_token]);
+    }
+
     private function request(): PendingRequest
     {
-        return $this->http()->withHeaders([
-            'X-Kony-Authorization' => $this->session->access_token ?? throw new BankApiException('Session is not authenticated.'),
+        return $this->authenticated()->withHeaders([
             'X-Kony-DeviceId' => $this->session->device_id,
             'X-Kony-API-Version' => '1.0',
             'X-Kony-ReportingParams' => $this->reportingParams(),
