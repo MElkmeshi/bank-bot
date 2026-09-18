@@ -5,6 +5,7 @@ namespace App\Telegram;
 use App\Enums\Bank;
 use App\Telegram\Conversations\RegisterConversation;
 use App\Telegram\Conversations\TransferConversation;
+use App\Telegram\Conversations\VoucherConversation;
 use App\Telegram\Handlers\BalanceHandler;
 use App\Telegram\Handlers\DeleteDeviceHandler;
 use App\Telegram\Handlers\TransactionsHandler;
@@ -20,6 +21,7 @@ class BotKernel
 
         $bot->getContainer()->bind(RegisterConversation::class, fn () => new RegisterConversation($bank));
         $bot->getContainer()->bind(TransferConversation::class, fn () => new TransferConversation($bank));
+        $bot->getContainer()->bind(VoucherConversation::class, fn () => new VoucherConversation($bank));
 
         $bot->onCommand('start', function (Nutgram $bot) {
             RegisterConversation::begin($bot);
@@ -53,6 +55,10 @@ class BotKernel
 
         $bot->onCommand('transfer', function (Nutgram $bot) {
             TransferConversation::begin($bot);
+        });
+
+        $bot->onCommand('voucher', function (Nutgram $bot) {
+            VoucherConversation::begin($bot);
         });
 
         $bot->fallback(function (Nutgram $bot) {

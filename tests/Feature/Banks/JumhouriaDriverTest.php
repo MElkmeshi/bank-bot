@@ -221,3 +221,41 @@ it('turns envelope errors into bank exceptions', function () {
 
     expect(fn () => jbSession()->driver()->contacts())->toThrow(BankApiException::class, 'معلومات الحساب غير صحيحة');
 });
+
+it('lists voucher providers, requests the SMS OTP and buys a voucher', function () {
+    Http::fake([
+        JB.'/Lists/Vouchers*' => Http::response(envelope([
+            ['providerName' => 'المدار', 'providerId' => '31', 'vouchers' => ['5', '10', '20']],
+            ['providerName' => 'ليبيانا', 'providerId' => '32', 'vouchers' => ['5', '10', '30']],
+        ])),
+        JB.'/AfradAuth/Accounts' => Http::response(envelope(jbAccounts())),
+        JB.'/AfradAuth/SignAccountAfrad*' => Http::response(envelope(['value' => 'scoped-token'])),
+        JB.'/AfradAuth/ResendActiveCode*' => Http::response(envelope()),
+        JB.'/Transactions/BVTransaction' => Http::response(envelope(null, 1, ['تمت العملية بنجاح'])),
+        JB.'/Reporting/Vouchers*' => Http::response(envelope(['pageContent' => [
+            ['sequenceNumber' => 102741507, 'providerId' => 32, 'cardValue' => 5, 'cardSerial' => '535742257451336', 'cardSecret' => '9949752836112', 'creationTime' => '2026-09-18T14:15:25'],
+            ['sequenceNumber' => 102522280, 'providerId' => 32, 'cardValue' => 5, 'cardSerial' => '535742257419438', 'cardSecret' => '9959485898864', 'creationTime' => '2026-09-16T12:03:21'],
+            ['sequenceNumber' => 99728108, 'providerId' => 31, 'cardValue' => 10, 'cardSerial' => '1', 'cardSecret' => '2', 'creationTime' => '2026-09-17T00:00:00'],
+        ]])),
+    ]);
+
+    $driver = jbSession()->driver();
+
+    expect($driver->voucherProviders()->toCollection()->pluck('name')->all())->toBe(['المدار', 'ليبيانا'])
+        ->and($driver->voucherDenominations('32')->toCollection()->pluck('amount')->all())->toBe(['5', '10', '30']);
+
+    $quote = $driver->purchaseVoucher(new App\Data\Bank\VoucherPurchaseRequestData('002201000110432', '32', '5'));
+
+    expect($quote->requires_otp)->toBeTrue()->and($quote->provider_name)->toBe('ليبيانا');
+
+    Http::assertSent(fn (Request $request) => str_contains($request->url(), 'ResendActiveCode?otpType=0'));
+
+    $voucher = $driver->confirmVoucherPurchase(App\Data\Bank\VoucherQuoteData::from($quote->toArray()), '359867');
+
+    expect($voucher->code)->toBe('9949752836112')
+        ->and($voucher->serial)->toBe('535742257451336')
+        ->and($voucher->reference)->toBe('102741507');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/Transactions/BVTransaction')
+        && $request['providerId'] === '32' && $request['cardValue'] === '5' && $request['otp'] === '359867' && $request['accountType'] === 0);
+});

@@ -170,3 +170,31 @@ it('surfaces the bank error message on a wrong OTP', function () {
     expect(fn () => nabSession()->driver()->confirmTransfer($quote, '000000'))
         ->toThrow(BankApiException::class, 'رقم التحقق الذي ادخلته غير صحيح');
 });
+
+it('lists voucher types and buys a voucher without an OTP', function () {
+    Http::fake([
+        'nabmobile.nab.ly/api/vouchers/types' => Http::response([
+            ['id' => 1, 'nameAr' => 'ليبيانا', 'categories' => [['id' => 1, 'description' => 'كرت 3', 'price' => 3], ['id' => 3, 'description' => 'كرت 10', 'price' => 10]]],
+            ['id' => 2, 'nameAr' => 'المدار', 'categories' => [['id' => 7, 'description' => 'كرت 5', 'price' => 5]]],
+        ]),
+        'nabmobile.nab.ly/api/vouchers' => Http::response(['iconLink' => 'almadar.png', 'price' => 5, 'description' => 'المدار', 'voucherCode' => '8732317956079', 'boughtAt' => '2026-07-04 14:39']),
+    ]);
+
+    $driver = nabSession()->driver();
+
+    expect($driver->voucherProviders()->toCollection()->pluck('name')->all())->toBe(['ليبيانا', 'المدار'])
+        ->and($driver->voucherDenominations('2')->first()->label)->toBe('كرت 5');
+
+    $quote = $driver->purchaseVoucher(new App\Data\Bank\VoucherPurchaseRequestData('012011379453011', '2', '7'));
+
+    expect($quote->requires_otp)->toBeFalse()
+        ->and($quote->amount_formatted)->toBe('5.000 LYD');
+
+    $voucher = $driver->confirmVoucherPurchase($quote);
+
+    expect($voucher->code)->toBe('8732317956079')
+        ->and($voucher->provider_name)->toBe('المدار')
+        ->and($voucher->purchased_at)->toBe('2026-07-04 14:39');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/api/vouchers') && $request->method() === 'POST' && $request['voucherCategoryId'] === 7);
+});

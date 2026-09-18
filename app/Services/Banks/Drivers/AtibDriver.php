@@ -10,8 +10,14 @@ use App\Data\Bank\TransactionData;
 use App\Data\Bank\TransferQuoteData;
 use App\Data\Bank\TransferReceiptData;
 use App\Data\Bank\TransferRequestData;
+use App\Data\Bank\VoucherData;
+use App\Data\Bank\VoucherDenominationData;
+use App\Data\Bank\VoucherProviderData;
+use App\Data\Bank\VoucherPurchaseRequestData;
+use App\Data\Bank\VoucherQuoteData;
 use App\Exceptions\BankApiException;
 use App\Services\Banks\AbstractBankDriver;
+use App\Services\Banks\Contracts\SellsVouchers;
 use App\Services\Banks\Support\LibyanIban;
 use Carbon\Carbon;
 use Illuminate\Http\Client\PendingRequest;
@@ -28,9 +34,11 @@ use Spatie\LaravelData\DataCollection;
  * form body and report failures inside an HTTP 200 through opstatus /
  * dbpErrCode. P2P (LYPAY) transfers are confirmed with an SMS secure access code.
  */
-class AtibDriver extends AbstractBankDriver
+class AtibDriver extends AbstractBankDriver implements SellsVouchers
 {
     private const OPERATIONS = '/services/data/v1';
+
+    private const VOUCHER_SERVICE_CODE = '2501';
 
     public function credentialPrompts(): CredentialPromptsData
     {
@@ -224,6 +232,111 @@ class AtibDriver extends AbstractBankDriver
             reference: $response->json('referenceId'),
             message: $response->json('message'),
         );
+    }
+
+    public function voucherProviders(): DataCollection
+    {
+        $providers = array_filter($this->mnoList(), fn (array $mno) => collect($mno['servicelist'] ?? [])
+            ->contains(fn (array $service) => (string) $service['servicecode'] === self::VOUCHER_SERVICE_CODE));
+
+        return VoucherProviderData::collect(array_values(array_map(fn (array $mno) => [
+            'id' => (string) $mno['mnocode'],
+            'name' => $mno['mnolabel'],
+        ], $providers)), DataCollection::class);
+    }
+
+    public function voucherDenominations(string $providerId): DataCollection
+    {
+        $denominations = $this->operation('RBObjects/operations/Cards/getMNODenomination', [
+            'mnocode' => $providerId,
+            'servicecode' => self::VOUCHER_SERVICE_CODE,
+        ])->json('denominationlist') ?? [];
+
+        return VoucherDenominationData::collect(array_map(fn (array $denomination) => [
+            'id' => (string) $denomination['denominationcode'],
+            'amount' => (string) $denomination['denominationlabel'],
+            'currency' => $denomination['Currency'] ?? 'LYD',
+            'label' => "{$denomination['denominationlabel']} ".($denomination['Currency'] ?? 'LYD'),
+        ], $denominations), DataCollection::class);
+    }
+
+    public function purchaseVoucher(VoucherPurchaseRequestData $request): VoucherQuoteData
+    {
+        $provider = $this->voucherProviders()->toCollection()->firstWhere('id', $request->provider_id);
+        $denomination = $this->voucherDenominations($request->provider_id)->toCollection()->firstWhere('id', $request->denomination_id);
+
+        if ($provider === null || $denomination === null) {
+            throw new BankApiException('Unknown voucher provider or amount.');
+        }
+
+        $response = $this->operation('RBObjects/operations/Cards/purchaseMNO', [
+            'denominationcode' => $denomination->id,
+            'denominationamount' => $denomination->amount,
+            'debitcurrency' => $denomination->currency,
+            'mnocode' => $provider->id,
+            'mnoname' => $provider->name,
+            'servicename' => 'Prepaid Voucher',
+            'servicecode' => self::VOUCHER_SERVICE_CODE,
+            'accountId' => $request->account_number,
+            'foreignAmount' => '',
+            'foreignCurrency' => '',
+        ])->json();
+
+        $mfa = $response['MFAAttributes'] ?? null;
+
+        return new VoucherQuoteData(
+            account_number: $request->account_number,
+            provider_id: $provider->id,
+            provider_name: $provider->name,
+            amount: $denomination->amount,
+            amount_formatted: $this->formatAmount($denomination->amount, $denomination->currency),
+            currency: $denomination->currency,
+            requires_otp: $mfa !== null,
+            meta: [
+                'security_key' => $mfa['securityKey'] ?? null,
+                'service_key' => $mfa['serviceKey'] ?? null,
+                'purchase' => $mfa === null ? $response : null,
+            ],
+        );
+    }
+
+    public function confirmVoucherPurchase(VoucherQuoteData $quote, ?string $otp = null): VoucherData
+    {
+        $response = $quote->requires_otp
+            ? $this->operation('RBObjects/operations/Cards/purchaseMNO', [
+                'MFAAttributes' => [
+                    'serviceName' => $this->bank->config('mfa_service_name'),
+                    'serviceKey' => $quote->meta['service_key'],
+                    'OTP' => ['securityKey' => $quote->meta['security_key'], 'otp' => $otp],
+                ],
+            ])->json()
+            : ($quote->meta['purchase'] ?? []);
+
+        $purchase = $response['mnoPurchase'][0] ?? null;
+
+        if ($purchase === null || empty($purchase['pinCode'])) {
+            throw new BankApiException(
+                BankApiException::describe($this->bank, 200, 'the purchase response did not include a voucher code', $response),
+                200,
+                $response,
+            );
+        }
+
+        return new VoucherData(
+            provider_name: $purchase['mnoname'] ?? $quote->provider_name,
+            amount: (string) ($purchase['denominationamount'] ?? $quote->amount),
+            currency: $purchase['debitcurrency'] ?? $quote->currency,
+            code: (string) $purchase['pinCode'],
+            serial: isset($purchase['serialNum']) ? (string) $purchase['serialNum'] : null,
+            reference: $response['code'] ?? null,
+            purchased_at: isset($purchase['transactiondate']) ? Carbon::createFromFormat('Ymd', $purchase['transactiondate'])->toDateString() : null,
+        );
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function mnoList(): array
+    {
+        return $this->operation('RBObjects/operations/Cards/getMNOServiceList')->json('mnolist') ?? [];
     }
 
     /**

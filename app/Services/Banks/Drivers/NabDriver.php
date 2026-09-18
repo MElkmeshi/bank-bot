@@ -10,8 +10,14 @@ use App\Data\Bank\TransactionData;
 use App\Data\Bank\TransferQuoteData;
 use App\Data\Bank\TransferReceiptData;
 use App\Data\Bank\TransferRequestData;
+use App\Data\Bank\VoucherData;
+use App\Data\Bank\VoucherDenominationData;
+use App\Data\Bank\VoucherProviderData;
+use App\Data\Bank\VoucherPurchaseRequestData;
+use App\Data\Bank\VoucherQuoteData;
 use App\Exceptions\BankApiException;
 use App\Services\Banks\AbstractBankDriver;
+use App\Services\Banks\Contracts\SellsVouchers;
 use App\Services\Banks\Support\LibyanIban;
 use Carbon\Carbon;
 use Illuminate\Http\Client\PendingRequest;
@@ -26,7 +32,7 @@ use Spatie\LaravelData\DataCollection;
  * driver re-logs in with the stored credentials when the token expires.
  * Each login is bound to a single account, described by the JWT claims.
  */
-class NabDriver extends AbstractBankDriver
+class NabDriver extends AbstractBankDriver implements SellsVouchers
 {
     private const CURRENCY = 'LYD';
 
@@ -158,6 +164,68 @@ class NabDriver extends AbstractBankDriver
         $this->throwIfFailed($response, 'errorMessage');
 
         return new TransferReceiptData(reference: $response->json('id'));
+    }
+
+    public function voucherProviders(): DataCollection
+    {
+        return VoucherProviderData::collect(array_map(fn (array $type) => [
+            'id' => (string) $type['id'],
+            'name' => $type['nameAr'],
+        ], $this->voucherTypes()), DataCollection::class);
+    }
+
+    public function voucherDenominations(string $providerId): DataCollection
+    {
+        $type = collect($this->voucherTypes())->first(fn (array $type) => (string) $type['id'] === $providerId);
+
+        return VoucherDenominationData::collect(array_map(fn (array $category) => [
+            'id' => (string) $category['id'],
+            'amount' => (string) $category['price'],
+            'currency' => self::CURRENCY,
+            'label' => $category['description'],
+        ], $type['categories'] ?? []), DataCollection::class);
+    }
+
+    public function purchaseVoucher(VoucherPurchaseRequestData $request): VoucherQuoteData
+    {
+        $provider = $this->voucherProviders()->toCollection()->firstWhere('id', $request->provider_id);
+        $denomination = $this->voucherDenominations($request->provider_id)->toCollection()->firstWhere('id', $request->denomination_id);
+
+        if ($provider === null || $denomination === null) {
+            throw new BankApiException('Unknown voucher provider or amount.');
+        }
+
+        return new VoucherQuoteData(
+            account_number: $request->account_number,
+            provider_id: $provider->id,
+            provider_name: $provider->name,
+            amount: $denomination->amount,
+            amount_formatted: $this->formatAmount($denomination->amount, self::CURRENCY),
+            currency: self::CURRENCY,
+            requires_otp: false,
+            meta: ['category_id' => (int) $denomination->id],
+        );
+    }
+
+    public function confirmVoucherPurchase(VoucherQuoteData $quote, ?string $otp = null): VoucherData
+    {
+        $response = $this->throwIfFailed($this->request()->post('/api/vouchers', [
+            'voucherCategoryId' => $quote->meta['category_id'],
+        ]), 'errorMessage');
+
+        return new VoucherData(
+            provider_name: $response->json('description') ?? $quote->provider_name,
+            amount: (string) ($response->json('price') ?? $quote->amount),
+            currency: self::CURRENCY,
+            code: (string) $response->json('voucherCode'),
+            purchased_at: $response->json('boughtAt'),
+        );
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function voucherTypes(): array
+    {
+        return $this->throwIfFailed($this->request()->get('/api/vouchers/types'), 'errorMessage')->json() ?? [];
     }
 
     /**

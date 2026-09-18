@@ -190,3 +190,64 @@ it('logs out of the DBX session', function () {
 
     Http::assertSent(fn (Request $request) => str_contains($request->url(), 'logout?provider=DbxUserLogin') && $request['slo'] === 'false');
 });
+
+it('lists voucher providers and their denominations', function () {
+    Http::fake([
+        ATIB.'/services/data/v1/RBObjects/operations/Cards/getMNOServiceList' => Http::response(['mnolist' => [
+            ['mnocode' => '30', 'mnolabel' => 'Libyana', 'servicelist' => [['servicelabel' => 'Prepaid Voucher', 'servicecode' => '2501']]],
+            ['mnocode' => '31', 'mnolabel' => 'Almadar', 'servicelist' => [['servicelabel' => 'Prepaid Voucher', 'servicecode' => '2501']]],
+            ['mnocode' => '99', 'mnolabel' => 'Bills only', 'servicelist' => [['servicelabel' => 'Bill', 'servicecode' => '2600']]],
+        ], 'opstatus' => 0]),
+        ATIB.'/services/data/v1/RBObjects/operations/Cards/getMNODenomination' => Http::response(['denominationlist' => [
+            ['denominationcode' => '0310003', 'denominationlabel' => '3', 'Currency' => 'LYD'],
+            ['denominationcode' => '0310005', 'denominationlabel' => '5', 'Currency' => 'LYD'],
+        ], 'opstatus' => 0]),
+    ]);
+
+    $driver = atibSession()->driver();
+
+    expect($driver->voucherProviders()->toCollection()->pluck('name')->all())->toBe(['Libyana', 'Almadar'])
+        ->and($driver->voucherDenominations('31')->first())
+        ->id->toBe('0310003')
+        ->amount->toBe('3')
+        ->label->toBe('3 LYD');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/getMNODenomination') && jsondata($request) === ['mnocode' => '31', 'servicecode' => '2501']);
+});
+
+it('buys a voucher through the MFA flow and returns the pin code', function () {
+    Http::fake([
+        ATIB.'/services/data/v1/RBObjects/operations/Cards/getMNOServiceList' => Http::response(['mnolist' => [
+            ['mnocode' => '31', 'mnolabel' => 'Almadar', 'servicelist' => [['servicelabel' => 'Prepaid Voucher', 'servicecode' => '2501']]],
+        ], 'opstatus' => 0]),
+        ATIB.'/services/data/v1/RBObjects/operations/Cards/getMNODenomination' => Http::response(['denominationlist' => [
+            ['denominationcode' => '0310003', 'denominationlabel' => '3', 'Currency' => 'LYD'],
+        ], 'opstatus' => 0]),
+        ATIB.'/services/data/v1/RBObjects/operations/Cards/purchaseMNO' => Http::sequence()
+            ->push(['MFAAttributes' => ['securityKey' => 'sec', 'serviceKey' => 'svc', 'isMFARequired' => 'true'], 'success' => 'OTP request sent successfully.'])
+            ->push(['code' => 'FT26263HCMNQ', 'mnoPurchase' => [['denominationamount' => '3.000', 'debitcurrency' => 'LYD', 'transactiondate' => '20260920', 'mnoname' => 'Almadar', 'pinCode' => '0899688514053', 'serialNum' => '00219938625']], 'opstatus' => 0]),
+    ]);
+
+    $driver = atibSession()->driver();
+    $quote = $driver->purchaseVoucher(new App\Data\Bank\VoucherPurchaseRequestData('10000000850247', '31', '0310003'));
+
+    expect($quote->requires_otp)->toBeTrue()
+        ->and($quote->provider_name)->toBe('Almadar')
+        ->and($quote->amount_formatted)->toBe('3.000 LYD');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/purchaseMNO') && jsondata($request) === [
+        'denominationcode' => '0310003', 'denominationamount' => '3', 'debitcurrency' => 'LYD', 'mnocode' => '31', 'mnoname' => 'Almadar',
+        'servicename' => 'Prepaid Voucher', 'servicecode' => '2501', 'accountId' => '10000000850247', 'foreignAmount' => '', 'foreignCurrency' => '',
+    ]);
+
+    $voucher = $driver->confirmVoucherPurchase(App\Data\Bank\VoucherQuoteData::from($quote->toArray()), '537');
+
+    expect($voucher->code)->toBe('0899688514053')
+        ->and($voucher->serial)->toBe('00219938625')
+        ->and($voucher->reference)->toBe('FT26263HCMNQ')
+        ->and($voucher->amount)->toBe('3.000')
+        ->and($voucher->purchased_at)->toBe('2026-09-20');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/purchaseMNO')
+        && (jsondata($request)['MFAAttributes']['OTP']['otp'] ?? null) === '537');
+});

@@ -160,6 +160,7 @@ class RegisterConversation extends Conversation
             ."/balance - Check your account balance\n"
             ."/transactions - View recent transactions\n"
             ."/transfer - Send a bank transfer\n"
+            ."/voucher - Buy a prepaid voucher\n"
             .'/delete_device - Remove this device'
         );
 

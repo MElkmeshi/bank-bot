@@ -10,10 +10,16 @@ use App\Data\Bank\TransactionData;
 use App\Data\Bank\TransferQuoteData;
 use App\Data\Bank\TransferReceiptData;
 use App\Data\Bank\TransferRequestData;
+use App\Data\Bank\VoucherData;
+use App\Data\Bank\VoucherDenominationData;
+use App\Data\Bank\VoucherProviderData;
+use App\Data\Bank\VoucherPurchaseRequestData;
+use App\Data\Bank\VoucherQuoteData;
 use App\Enums\Bank;
 use App\Exceptions\BankApiException;
 use App\Models\BankSession;
 use App\Services\Banks\AbstractBankDriver;
+use App\Services\Banks\Contracts\SellsVouchers;
 use App\Services\Banks\Support\LibyanIban;
 use App\Services\FirebaseService;
 use Carbon\Carbon;
@@ -35,7 +41,7 @@ use Throwable;
  *
  * Every response is wrapped in {content, type, messages, traceId} where type 1 is success.
  */
-class JumhouriaDriver extends AbstractBankDriver
+class JumhouriaDriver extends AbstractBankDriver implements SellsVouchers
 {
     private const CURRENCIES = [1 => 'LYD', 2 => 'USD'];
 
@@ -210,6 +216,107 @@ class JumhouriaDriver extends AbstractBankDriver
         preg_match('/\b(\d{3}MT\d+)\b/u', $message, $matches);
 
         return new TransferReceiptData(reference: $matches[1] ?? null, message: $message ?: null);
+    }
+
+    public function voucherProviders(): DataCollection
+    {
+        return VoucherProviderData::collect(array_map(fn (array $provider) => [
+            'id' => (string) $provider['providerId'],
+            'name' => trim($provider['providerName']),
+        ], $this->voucherCatalog()), DataCollection::class);
+    }
+
+    public function voucherDenominations(string $providerId): DataCollection
+    {
+        $provider = collect($this->voucherCatalog())->first(fn (array $provider) => (string) $provider['providerId'] === $providerId);
+
+        return VoucherDenominationData::collect(array_map(fn (string $value) => [
+            'id' => $value,
+            'amount' => $value,
+            'currency' => 'LYD',
+            'label' => "{$value} LYD",
+        ], $provider['vouchers'] ?? []), DataCollection::class);
+    }
+
+    public function purchaseVoucher(VoucherPurchaseRequestData $request): VoucherQuoteData
+    {
+        $provider = $this->voucherProviders()->toCollection()->firstWhere('id', $request->provider_id);
+        $denomination = $this->voucherDenominations($request->provider_id)->toCollection()->firstWhere('id', $request->denomination_id);
+
+        if ($provider === null || $denomination === null) {
+            throw new BankApiException('Unknown voucher provider or amount.');
+        }
+
+        $this->selectAccount($request->account_number);
+        $this->unwrap($this->request()->get('/AfradAuth/ResendActiveCode', ['otpType' => 0]));
+
+        return new VoucherQuoteData(
+            account_number: $request->account_number,
+            provider_id: $provider->id,
+            provider_name: $provider->name,
+            amount: $denomination->amount,
+            amount_formatted: $this->formatAmount($denomination->amount, 'LYD'),
+            currency: 'LYD',
+            requires_otp: true,
+        );
+    }
+
+    public function confirmVoucherPurchase(VoucherQuoteData $quote, ?string $otp = null): VoucherData
+    {
+        $this->selectAccount($quote->account_number);
+
+        $content = $this->unwrap($this->request()->post('/Transactions/BVTransaction', [
+            'accountType' => 0,
+            'providerId' => $quote->provider_id,
+            'cardValue' => $quote->amount,
+            'otp' => $otp,
+        ]));
+
+        $card = is_array($content) && isset($content['cardSecret'])
+            ? $content
+            : $this->latestPurchasedVoucher($quote);
+
+        return new VoucherData(
+            provider_name: $quote->provider_name,
+            amount: (string) ($card['cardValue'] ?? $quote->amount),
+            currency: 'LYD',
+            code: (string) $card['cardSecret'],
+            serial: isset($card['cardSerial']) ? (string) $card['cardSerial'] : null,
+            reference: isset($card['sequenceNumber']) ? (string) $card['sequenceNumber'] : null,
+            purchased_at: $card['creationTime'] ?? null,
+        );
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function voucherCatalog(): array
+    {
+        return $this->unwrap($this->request()->get('/Lists/Vouchers', ['includeDisabledProviders' => 'false'])) ?? [];
+    }
+
+    /**
+     * The purchase response was not captured, so fall back to the newest voucher in the purchase report.
+     *
+     * @return array<string, mixed>
+     */
+    private function latestPurchasedVoucher(VoucherQuoteData $quote): array
+    {
+        $report = $this->unwrap($this->request()->get('/Reporting/Vouchers', [
+            'page' => 1,
+            'providerId' => 0,
+            'voucherRetrievalMode' => 1,
+            'isMasroufiService' => 'false',
+        ]));
+
+        $card = collect($report['pageContent'] ?? [])
+            ->filter(fn (array $card) => (string) $card['providerId'] === $quote->provider_id && (string) $card['cardValue'] === $quote->amount)
+            ->sortByDesc('creationTime')
+            ->first();
+
+        if ($card === null || ! isset($card['cardSecret'])) {
+            throw new BankApiException('The voucher was purchased but its code could not be retrieved. Check the vouchers report in the app.');
+        }
+
+        return $card;
     }
 
     /**
