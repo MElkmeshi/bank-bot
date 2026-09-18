@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\Bank;
 use App\Telegram\BotKernel;
+use App\Telegram\ResilientPolling;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use SergiX44\Nutgram\Configuration;
@@ -39,9 +40,11 @@ class RunBotCommand extends Command
 
         $config = new Configuration(
             cache: Cache::store(),
+            clientTimeout: 30,
         );
 
         $bot = new Nutgram($token, $config);
+        $bot->setRunningMode(new ResilientPolling);
 
         BotKernel::register($bot, $bank);
 
