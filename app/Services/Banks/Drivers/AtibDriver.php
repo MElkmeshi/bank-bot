@@ -517,7 +517,7 @@ class AtibDriver extends AbstractBankDriver implements SellsVouchers
 
     protected function withAuthorization(PendingRequest $request): PendingRequest
     {
-        return $request->withHeaders(['X-Kony-Authorization' => $this->session->access_token]);
+        return $request->replaceHeaders(['X-Kony-Authorization' => $this->session->access_token]);
     }
 
     private function request(): PendingRequest

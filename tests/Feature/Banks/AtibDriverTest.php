@@ -264,5 +264,6 @@ it('re-logs in and retries with the new claims token on a 401', function () {
 
     expect(atibSession()->driver()->accounts()->first()->number)->toBe('10000000850247');
 
-    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/getAccountsPostLogin') && $request->hasHeader('X-Kony-Authorization', 'new-claims'));
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/getAccountsPostLogin')
+        && $request->header('X-Kony-Authorization') === ['new-claims']);
 });
