@@ -27,8 +27,8 @@ return [
             'firebase_project' => env('ANDALUS_FIREBASE_PROJECT', 'andalus-neptune'),
             'firebase_api_key' => env('ANDALUS_FIREBASE_API_KEY', 'AIzaSyBs2XJGaKNOtrhnoHYnJGC-Th_75uE3GII'),
             'firebase_app_id' => env('ANDALUS_FIREBASE_APP_ID', '1:347355877973:android:36daefa0fe356193c8badc'),
-            'build_number' => env('ANDALUS_BUILD_NUMBER', '300'),
-            'app_version' => env('ANDALUS_APP_VERSION', '1.2.5'),
+            'build_number' => env('ANDALUS_BUILD_NUMBER', '300000'),
+            'app_version' => env('ANDALUS_APP_VERSION', '1000.0.0'),
             'proxy' => env('ANDALUS_PROXY'),
         ],
 
@@ -40,8 +40,8 @@ return [
             'firebase_project' => env('NURAN_FIREBASE_PROJECT', 'nuran-prod'),
             'firebase_api_key' => env('NURAN_FIREBASE_API_KEY', 'AIzaSyCpfkJOx099Qk9yg9hb-tQPQM-ATnohBfU'),
             'firebase_app_id' => env('NURAN_FIREBASE_APP_ID', '1:900819939534:android:3ef1ece59785a256aca09f'),
-            'build_number' => env('NURAN_BUILD_NUMBER', '300'),
-            'app_version' => env('NURAN_APP_VERSION', '1.2.5'),
+            'build_number' => env('NURAN_BUILD_NUMBER', '300000'),
+            'app_version' => env('NURAN_APP_VERSION', '1000.0.0'),
             'proxy' => env('NURAN_PROXY'),
         ],
 
