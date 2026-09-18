@@ -1,0 +1,195 @@
+<?php
+
+use App\Enums\Bank;
+use App\Exceptions\BankApiException;
+use App\Models\BankSession;
+use App\Services\Banks\Drivers\NeptuneDriver;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
+
+uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    config()->set('banks.banks.andalus.base_url', 'https://andalus.test/api/v1');
+});
+
+it('registers a device and asks for an OTP', function () {
+    Http::fake([
+        'firebaseinstallations.googleapis.com/*' => Http::response(['fid' => 'fid-123']),
+        'andalus.test/api/v1/register' => Http::response(['data' => [
+            'verification_reference' => 'ref-1',
+            'customer' => ['name' => 'Ali', 'customer_id' => '42'],
+        ]]),
+    ]);
+
+    $session = BankSession::factory()->create();
+    $result = $session->driver()->login('42', 'secret');
+
+    expect($result->requires_otp)->toBeTrue()
+        ->and($session->fresh())
+        ->device_id->toBe('fid-123')
+        ->customer_id->toBe('42')
+        ->verification_reference->toBe('ref-1')
+        ->credentials->toBeNull();
+
+    Http::assertSent(fn (Request $request) => $request->url() === 'https://andalus.test/api/v1/register'
+        && $request['device_id'] === 'fid-123'
+        && $request->header('N-Device-ID')[0] === 'fid-123');
+});
+
+it('stores tokens after verifying the OTP', function () {
+    Http::fake([
+        'andalus.test/api/v1/register/verify' => Http::response(['data' => [
+            'access_token' => 'access',
+            'refresh_token' => 'refresh',
+            'access_token_expires_at' => now()->addHour()->timestamp,
+            'refresh_token_expires_at' => now()->addDay()->timestamp,
+            'customer' => ['name' => 'Ali', 'customer_id' => '42'],
+        ]]),
+    ]);
+
+    $session = BankSession::factory()->create(['verification_reference' => 'ref-1']);
+    $result = $session->driver()->verifyOtp('123456');
+
+    expect($result->requires_otp)->toBeFalse()
+        ->and($result->customer_name)->toBe('Ali')
+        ->and($session->fresh())
+        ->access_token->toBe('access')
+        ->refresh_token->toBe('refresh')
+        ->verification_reference->toBeNull()
+        ->isAuthenticated()->toBeTrue();
+});
+
+it('refreshes an expired access token', function () {
+    Http::fake([
+        'andalus.test/api/v1/refresh-token' => Http::response(['data' => [
+            'access_token' => 'fresh',
+            'access_token_expires_at' => now()->addHour()->timestamp,
+        ]]),
+    ]);
+
+    $session = BankSession::factory()->expired()->create();
+
+    expect($session->driver()->ensureAuthenticated())->toBeTrue()
+        ->and($session->fresh()->access_token)->toBe('fresh');
+
+    Http::assertSent(fn (Request $request) => $request->hasHeader('Authorization', 'Bearer refresh-token'));
+});
+
+it('maps accounts, transactions and contacts', function () {
+    Http::fake([
+        'andalus.test/api/v1/accounts' => Http::response(['data' => [[
+            'number' => '1001',
+            'description' => 'Current',
+            'available_balance' => '10.500',
+            'available_balance_formatted' => '10.500 LYD',
+            'currency' => 'LYD',
+            'currency_symbols' => 'د.ل',
+            'iban' => 'LY30024007010200315020701',
+        ]]]),
+        'andalus.test/api/v1/accounts/1001/transactions' => Http::response(['data' => [[
+            'reference' => 'TX1',
+            'code' => 'TRF',
+            'code_description' => 'Transfer',
+            'type' => 'credit',
+            'type_label' => 'Credit',
+            'date' => '2026-09-18 10:00:00',
+            'amount' => '5.000',
+            'amount_formatted' => '5.000 LYD',
+            'currency' => 'LYD',
+            'currency_symbols' => 'د.ل',
+            'event' => 'INIT',
+            'counterparty_name' => 'Sara',
+        ]]]),
+        'andalus.test/api/v1/contacts' => Http::response(['data' => [[
+            'id' => 1,
+            'uuid' => 'u',
+            'name' => 'Sara',
+            'schema' => 'iban',
+            'identification' => 'LY94007012012011379453011',
+            'institution_code' => '007',
+            'institution_name' => 'NAB',
+            'type' => 'external',
+            'type_label' => 'External',
+        ]]]),
+    ]);
+
+    $driver = BankSession::factory()->authenticated()->create()->driver();
+
+    expect($driver)->toBeInstanceOf(NeptuneDriver::class)
+        ->and($driver->accounts()->first()->iban)->toBe('LY30024007010200315020701')
+        ->and($driver->transactions('1001')->first())
+        ->reference->toBe('TX1')
+        ->isCredit()->toBeTrue()
+        ->and($driver->contacts()->first())
+        ->name->toBe('Sara')
+        ->institution_code->toBe('007');
+});
+
+it('initiates and confirms a transfer with an OTP', function () {
+    Http::fake([
+        'andalus.test/api/v1/transfers/lypay/initiate' => Http::response(['data' => [
+            'transaction_id' => 'tx-9',
+            'original_amount_formatted' => '100.000 LYD',
+            'total_amount_formatted' => '101.000 LYD',
+            'fees_formatted' => '1.000 LYD',
+            'currency' => 'LYD',
+            'description' => 'rent',
+            'requires_otp' => true,
+            'verification_reference' => 'vref',
+            'debtor' => ['name' => 'Ali', 'account_number' => '1001'],
+            'creditor' => ['name' => 'Sara', 'identification' => 'LY94007012012011379453011'],
+            'status' => ['code' => 'PENDING', 'description' => 'Pending'],
+        ]]),
+        'andalus.test/api/v1/transfers/lypay/tx-9/confirm' => Http::response(['data' => []]),
+    ]);
+
+    $session = BankSession::factory()->authenticated()->create(['customer_id' => '42']);
+    $driver = $session->driver();
+
+    $quote = $driver->initiateTransfer(new App\Data\Bank\TransferRequestData('1001', 'LY94007012012011379453011', '100', 'LYD', 'rent'));
+
+    expect($quote->requires_otp)->toBeTrue()
+        ->and($quote->reference)->toBe('tx-9')
+        ->and($quote->creditor_name)->toBe('Sara');
+
+    $receipt = $driver->confirmTransfer(App\Data\Bank\TransferQuoteData::from($quote->toArray()), '111222');
+
+    expect($receipt->reference)->toBe('tx-9');
+
+    Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/tx-9/confirm')
+        && $request['customer_id'] === '42'
+        && $request['verification_reference'] === 'vref'
+        && $request['verification_code'] === '111222');
+});
+
+it('surfaces the bank error message', function () {
+    Http::fake([
+        'andalus.test/api/v1/accounts' => Http::response(['message' => 'Token expired'], 401),
+    ]);
+
+    $driver = BankSession::factory()->authenticated()->create()->driver();
+
+    expect(fn () => $driver->accounts())->toThrow(BankApiException::class, 'Token expired');
+});
+
+it('deletes the device on logout', function () {
+    Http::fake(['andalus.test/api/v1/devices/delete' => Http::response([])]);
+
+    $session = BankSession::factory()->authenticated()->create(['customer_id' => '42', 'device_id' => 'dev']);
+    $session->driver()->logout();
+
+    Http::assertSent(fn (Request $request) => $request->method() === 'DELETE'
+        && $request['customer_id'] === '42'
+        && $request['device_id'] === 'dev');
+});
+
+it('uses the nuran configuration for nuran sessions', function () {
+    config()->set('banks.banks.nuran.base_url', 'https://nuran.test/api/v1');
+    Http::fake(['nuran.test/*' => Http::response(['data' => []])]);
+
+    BankSession::factory()->forBank(Bank::Nuran)->authenticated()->create()->driver()->accounts();
+
+    Http::assertSent(fn (Request $request) => str_starts_with($request->url(), 'https://nuran.test/'));
+});

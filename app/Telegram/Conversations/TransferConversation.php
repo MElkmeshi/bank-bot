@@ -2,9 +2,11 @@
 
 namespace App\Telegram\Conversations;
 
+use App\Data\Bank\TransferQuoteData;
+use App\Data\Bank\TransferRequestData;
 use App\Enums\Bank;
-use App\Models\BankSession;
-use App\Services\BankApiService;
+use App\Services\Banks\Contracts\BankDriver;
+use App\Telegram\Concerns\ResolvesBankSession;
 use SergiX44\Nutgram\Conversations\Conversation;
 use SergiX44\Nutgram\Nutgram;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
@@ -12,6 +14,8 @@ use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 class TransferConversation extends Conversation
 {
+    use ResolvesBankSession;
+
     private string $sourceAccount = '';
 
     private string $iban = '';
@@ -20,11 +24,8 @@ class TransferConversation extends Conversation
 
     private string $description = '';
 
-    private string $transactionId = '';
-
-    private bool $requiresOtp = false;
-
-    private string $verificationReference = '';
+    /** @var array<string, mixed>|null */
+    private ?array $quote = null;
 
     public function __construct(
         private Bank $bank,
@@ -38,9 +39,7 @@ class TransferConversation extends Conversation
             'iban' => $this->iban,
             'amount' => $this->amount,
             'description' => $this->description,
-            'transactionId' => $this->transactionId,
-            'requiresOtp' => $this->requiresOtp,
-            'verificationReference' => $this->verificationReference,
+            'quote' => $this->quote,
         ];
     }
 
@@ -51,9 +50,7 @@ class TransferConversation extends Conversation
         $this->iban = $data['iban'] ?? '';
         $this->amount = $data['amount'] ?? '';
         $this->description = $data['description'] ?? '';
-        $this->transactionId = $data['transactionId'] ?? '';
-        $this->requiresOtp = $data['requiresOtp'] ?? false;
-        $this->verificationReference = $data['verificationReference'] ?? '';
+        $this->quote = $data['quote'] ?? null;
 
         $restoreParent = \Closure::bind(function (array $data) {
             $this->step = $data['step'] ?? 'start';
@@ -69,15 +66,14 @@ class TransferConversation extends Conversation
 
     public function start(Nutgram $bot): void
     {
-        $session = $this->getAuthenticatedSession($bot);
+        $driver = $this->getAuthenticatedDriver($bot);
 
-        if (! $session) {
+        if (! $driver) {
             return;
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $accounts = $apiService->getAccounts();
+            $accounts = $driver->accounts();
 
             if ($accounts->count() === 0) {
                 $bot->sendMessage('No accounts found.');
@@ -136,15 +132,14 @@ class TransferConversation extends Conversation
 
     private function showContacts(Nutgram $bot): void
     {
-        $session = $this->getAuthenticatedSession($bot);
+        $driver = $this->getAuthenticatedDriver($bot);
 
-        if (! $session) {
+        if (! $driver) {
             return;
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $contacts = $apiService->getContacts();
+            $contacts = $driver->contacts();
 
             $keyboard = InlineKeyboardMarkup::make();
 
@@ -258,43 +253,38 @@ class TransferConversation extends Conversation
 
     private function initiateTransfer(Nutgram $bot): void
     {
-        $session = $this->getAuthenticatedSession($bot);
+        $driver = $this->getAuthenticatedDriver($bot);
 
-        if (! $session) {
+        if (! $driver) {
             return;
         }
 
         $bot->sendMessage('Processing transfer, please wait...');
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-
-            $response = $apiService->initiateTransfer(
-                debtorAccountNumber: $this->sourceAccount,
+            $quote = $driver->initiateTransfer(new TransferRequestData(
+                debtor_account_number: $this->sourceAccount,
                 iban: $this->iban,
                 amount: $this->amount,
                 currency: 'LYD',
                 description: $this->description ?: null,
-            );
+            ));
 
-            $this->transactionId = $response->transaction_id;
-            $this->requiresOtp = $response->requires_otp;
-            $this->verificationReference = $response->verification_reference ?? '';
+            $this->quote = $quote->toArray();
 
-            $debtorName = $response->debtor['name'] ?? 'N/A';
-            $creditorName = $response->creditor['name'] ?? 'N/A';
-            $creditorIban = $response->creditor['identification'] ?? $this->iban;
+            $debtorName = $quote->debtor_name ?? 'N/A';
+            $creditorName = $quote->creditor_name ?? 'N/A';
 
             $summary = "📋 *Transfer Summary*\n\n"
                 ."From: *{$debtorName}*\n"
-                ."To: *{$creditorName}* (`{$creditorIban}`)\n"
-                ."Amount: *{$response->original_amount_formatted}*\n"
-                ."Fees: *{$response->fees_formatted}*\n"
-                ."Total: *{$response->total_amount_formatted}*\n"
-                ."Currency: {$response->currency}";
+                ."To: *{$creditorName}* (`{$quote->creditor_identification}`)\n"
+                ."Amount: *{$quote->amount_formatted}*\n"
+                .'Fees: *'.($quote->fees_formatted ?? 'N/A')."*\n"
+                ."Total: *{$quote->total_amount_formatted}*\n"
+                ."Currency: {$quote->currency}";
 
-            if ($response->description) {
-                $summary .= "\nNote: _{$response->description}_";
+            if ($quote->description) {
+                $summary .= "\nNote: _{$quote->description}_";
             }
 
             $keyboard = InlineKeyboardMarkup::make()
@@ -340,7 +330,7 @@ class TransferConversation extends Conversation
         if ($data === 'transfer_confirm') {
             $bot->answerCallbackQuery();
 
-            if ($this->requiresOtp) {
+            if ($this->quote['requires_otp'] ?? false) {
                 $bot->sendMessage('An OTP has been sent to your phone. Please enter the verification code:');
                 $this->next('receiveOtp');
 
@@ -370,23 +360,18 @@ class TransferConversation extends Conversation
 
     private function confirmTransfer(Nutgram $bot, ?string $otpCode = null): void
     {
-        $session = $this->getAuthenticatedSession($bot);
+        $driver = $this->getAuthenticatedDriver($bot);
 
-        if (! $session) {
+        if (! $driver || $this->quote === null) {
             return;
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
+            $receipt = $driver->confirmTransfer(TransferQuoteData::from($this->quote), $otpCode);
 
-            $apiService->confirmTransfer(
-                transactionId: $this->transactionId,
-                customerId: $otpCode !== null ? $session->customer_id : null,
-                verificationReference: $otpCode !== null ? $this->verificationReference : null,
-                verificationCode: $otpCode,
-            );
+            $reference = $receipt->reference ? "\nReference: `{$receipt->reference}`" : '';
 
-            $bot->sendMessage("✅ Transfer completed successfully!\n\nUse /balance to check your updated balance.");
+            $bot->sendMessage("✅ Transfer completed successfully!{$reference}\n\nUse /balance to check your updated balance.", parse_mode: 'Markdown');
             $this->end();
         } catch (\Throwable $e) {
             $bot->sendMessage("Transfer confirmation failed: {$e->getMessage()}");
@@ -394,19 +379,14 @@ class TransferConversation extends Conversation
         }
     }
 
-    private function getAuthenticatedSession(Nutgram $bot): ?BankSession
+    private function getAuthenticatedDriver(Nutgram $bot): ?BankDriver
     {
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $driver = $this->authenticatedDriver($bot);
 
-        if (! $session || (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded())) {
-            $bot->sendMessage('You are not authenticated. Please use /start to register.');
+        if (! $driver) {
             $this->end();
-
-            return null;
         }
 
-        return $session;
+        return $driver;
     }
 }

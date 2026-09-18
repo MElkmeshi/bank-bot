@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Http;
 
 class FirebaseService
 {
+    /**
+     * Register a Firebase installation for the bank's app and return its installation ID (FID).
+     */
     public function getInstallationId(Bank $bank): string
     {
         $project = $bank->config('firebase_project');
@@ -36,5 +39,26 @@ class FirebaseService
         $response->throw();
 
         return $response->json('fid');
+    }
+
+    /**
+     * Sign in anonymously with Firebase Auth and return the ID token.
+     */
+    public function anonymousIdToken(Bank $bank): string
+    {
+        $apiKey = $bank->config('firebase_api_key');
+
+        $response = Http::acceptJson()->post(
+            "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={$apiKey}",
+            ['returnSecureToken' => true]
+        );
+
+        if ($response->status() === 400) {
+            throw new FirebaseBlockedException;
+        }
+
+        $response->throw();
+
+        return $response->json('idToken');
     }
 }

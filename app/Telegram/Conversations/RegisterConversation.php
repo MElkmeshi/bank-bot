@@ -2,44 +2,41 @@
 
 namespace App\Telegram\Conversations;
 
-use App\Data\Bank\RegisterRequestData;
-use App\Data\Bank\VerifyOtpRequestData;
 use App\Enums\Bank;
 use App\Exceptions\FirebaseBlockedException;
 use App\Models\BankSession;
-use App\Services\BankApiService;
-use App\Services\FirebaseService;
-use Carbon\Carbon;
+use App\Services\Banks\BankManager;
+use App\Services\Banks\Contracts\BankDriver;
+use App\Telegram\Concerns\ResolvesBankSession;
 use SergiX44\Nutgram\Conversations\Conversation;
 use SergiX44\Nutgram\Nutgram;
 
 class RegisterConversation extends Conversation
 {
-    private string $customerId = '';
+    use ResolvesBankSession;
 
-    private string $password = '';
+    private string $identifier = '';
+
+    private string $secret = '';
 
     public function __construct(
         private Bank $bank,
-        private FirebaseService $firebaseService,
     ) {}
 
     protected function getSerializableAttributes(): array
     {
         return [
             'bank' => $this->bank,
-            'firebaseService' => $this->firebaseService,
-            'customerId' => $this->customerId,
-            'password' => $this->password,
+            'identifier' => $this->identifier,
+            'secret' => $this->secret,
         ];
     }
 
     public function __unserialize(array $data): void
     {
         $this->bank = $data['bank'] ?? Bank::Andalus;
-        $this->firebaseService = $data['firebaseService'] ?? new FirebaseService;
-        $this->customerId = $data['customerId'] ?? '';
-        $this->password = $data['password'] ?? '';
+        $this->identifier = $data['identifier'] ?? '';
+        $this->secret = $data['secret'] ?? '';
 
         // Restore parent private properties via closure binding
         $restoreParent = \Closure::bind(function (array $data) {
@@ -49,18 +46,14 @@ class RegisterConversation extends Conversation
             $this->userId = $data['userId'] ?? null;
             $this->chatId = $data['chatId'] ?? null;
             $this->threadId = $data['threadId'] ?? null;
-        }, $this, \SergiX44\Nutgram\Conversations\Conversation::class);
+        }, $this, Conversation::class);
 
         $restoreParent($data);
     }
 
     public function start(Nutgram $bot): void
     {
-        $chatId = $bot->chatId();
-
-        $session = BankSession::where('telegram_chat_id', $chatId)
-            ->where('bank', $this->bank->value)
-            ->first();
+        $session = $this->findSession($bot);
 
         if ($session && $session->isAuthenticated()) {
             $bot->sendMessage("You are already registered with {$this->bank->displayName()}. Use /balance to check your balance.");
@@ -69,30 +62,34 @@ class RegisterConversation extends Conversation
             return;
         }
 
-        $bot->sendMessage("Welcome to {$this->bank->displayName()} bot!\n\nPlease enter your Customer ID:");
-        $this->next('askPassword');
+        $prompts = $this->driver($session ?? new BankSession)->credentialPrompts();
+        $hint = $prompts->identifier_hint ? " ({$prompts->identifier_hint})" : '';
+
+        $bot->sendMessage("Welcome to {$this->bank->displayName()} bot!\n\nPlease enter your {$prompts->identifier_label}{$hint}:");
+        $this->next('askSecret');
     }
 
-    public function askPassword(Nutgram $bot): void
+    public function askSecret(Nutgram $bot): void
     {
-        $this->customerId = trim($bot->message()->text ?? '');
+        $this->identifier = trim($bot->message()->text ?? '');
+        $prompts = $this->driver($this->findSession($bot) ?? new BankSession)->credentialPrompts();
 
-        if (empty($this->customerId)) {
-            $bot->sendMessage('Customer ID cannot be empty. Please enter your Customer ID:');
+        if (empty($this->identifier)) {
+            $bot->sendMessage("{$prompts->identifier_label} cannot be empty. Please enter your {$prompts->identifier_label}:");
 
             return;
         }
 
-        $bot->sendMessage("Please enter your Password:\n\n⚠️ Never share your password with anyone.");
-        $this->next('generateDeviceAndRegister');
+        $bot->sendMessage("Please enter your {$prompts->secret_label}:\n\n⚠️ Never share your {$prompts->secret_label} with anyone.");
+        $this->next('login');
     }
 
-    public function generateDeviceAndRegister(Nutgram $bot): void
+    public function login(Nutgram $bot): void
     {
-        $this->password = trim($bot->message()->text ?? '');
+        $this->secret = trim($bot->message()->text ?? '');
 
-        if (empty($this->password)) {
-            $bot->sendMessage('Password cannot be empty. Please enter your Password:');
+        if (empty($this->secret)) {
+            $bot->sendMessage('This field cannot be empty. Please try again:');
 
             return;
         }
@@ -100,35 +97,22 @@ class RegisterConversation extends Conversation
         $bot->sendMessage('Registering your device, please wait...');
 
         try {
-            $deviceId = $this->firebaseService->getInstallationId($this->bank);
-
-            $registerData = RegisterRequestData::from([
-                'customer_id' => $this->customerId,
-                'device_id' => $deviceId,
-                'password' => $this->password,
-            ]);
-
-            $apiService = new BankApiService($this->bank, $deviceId);
-            $registerResponse = $apiService->register($registerData);
-
-            BankSession::updateOrCreate(
-                [
-                    'telegram_chat_id' => $bot->chatId(),
-                    'bank' => $this->bank->value,
-                ],
-                [
-                    'customer_id' => $this->customerId,
-                    'device_id' => $deviceId,
-                    'verification_reference' => $registerResponse->verification_reference,
-                    'access_token' => null,
-                    'refresh_token' => null,
-                    'access_token_expires_at' => null,
-                    'refresh_token_expires_at' => null,
-                ]
+            $session = BankSession::firstOrCreate(
+                ['telegram_chat_id' => $bot->chatId(), 'bank' => $this->bank->value],
+                ['customer_id' => $this->identifier, 'device_id' => ''],
             );
 
-            $bot->sendMessage('An OTP has been sent to your phone. Please enter the verification code:');
-            $this->next('verifyOtp');
+            $result = $this->driver($session)->login($this->identifier, $this->secret);
+            $this->secret = '';
+
+            if ($result->requires_otp) {
+                $bot->sendMessage($result->otp_prompt ?? 'Please enter the verification code:');
+                $this->next('verifyOtp');
+
+                return;
+            }
+
+            $this->finish($bot, $result->customer_name);
         } catch (FirebaseBlockedException) {
             $bot->sendMessage('⚠️ Device registration is temporarily unavailable. Please try again later with /start');
             $this->end();
@@ -148,11 +132,9 @@ class RegisterConversation extends Conversation
             return;
         }
 
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $session = $this->findSession($bot);
 
-        if (! $session || ! $session->verification_reference) {
+        if (! $session) {
             $bot->sendMessage('Session expired. Please start again with /start');
             $this->end();
 
@@ -160,36 +142,32 @@ class RegisterConversation extends Conversation
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id);
+            $result = $this->driver($session)->verifyOtp($otpCode);
 
-            $verifyData = VerifyOtpRequestData::from([
-                'verification_reference' => $session->verification_reference,
-                'customer_id' => $session->customer_id,
-                'verification_code' => $otpCode,
-            ]);
-
-            $verifyResponse = $apiService->verifyOtp($verifyData);
-
-            $session->update([
-                'access_token' => $verifyResponse->access_token,
-                'refresh_token' => $verifyResponse->refresh_token,
-                'access_token_expires_at' => Carbon::createFromTimestamp($verifyResponse->access_token_expires_at),
-                'refresh_token_expires_at' => Carbon::createFromTimestamp($verifyResponse->refresh_token_expires_at),
-                'verification_reference' => null,
-            ]);
-
-            $bot->sendMessage(
-                "✅ Registration successful! Welcome, {$verifyResponse->customer->name}!\n\n"
-                ."Available commands:\n"
-                ."/balance - Check your account balance\n"
-                ."/transactions - View recent transactions\n"
-                ."/transfer - Send a bank transfer\n"
-                .'/delete_device - Remove this device'
-            );
-
-            $this->end();
+            $this->finish($bot, $result->customer_name);
         } catch (\Throwable $e) {
             $bot->sendMessage("Verification failed: {$e->getMessage()}\n\nPlease enter the code again or restart with /start");
         }
+    }
+
+    private function finish(Nutgram $bot, ?string $customerName): void
+    {
+        $greeting = $customerName ? " Welcome, {$customerName}!" : '';
+
+        $bot->sendMessage(
+            "✅ Registration successful!{$greeting}\n\n"
+            ."Available commands:\n"
+            ."/balance - Check your account balance\n"
+            ."/transactions - View recent transactions\n"
+            ."/transfer - Send a bank transfer\n"
+            .'/delete_device - Remove this device'
+        );
+
+        $this->end();
+    }
+
+    private function driver(BankSession $session): BankDriver
+    {
+        return app(BankManager::class)->driver($this->bank, $session);
     }
 }

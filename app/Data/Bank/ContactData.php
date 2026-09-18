@@ -6,15 +6,15 @@ use Spatie\LaravelData\Data;
 
 class ContactData extends Data
 {
+    public const SCHEMA_IBAN = 'iban';
+
+    public const SCHEMA_ACCOUNT = 'account';
+
     public function __construct(
-        public int $id,
-        public string $uuid,
         public string $name,
-        public string $schema,
         public string $identification,
-        public ?string $institution_code,
-        public ?string $institution_name,
-        public string $type,
-        public string $type_label,
+        public string $schema = self::SCHEMA_IBAN,
+        public ?string $institution_code = null,
+        public ?string $institution_name = null,
     ) {}
 }

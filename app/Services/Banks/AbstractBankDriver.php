@@ -1,0 +1,118 @@
+<?php
+
+namespace App\Services\Banks;
+
+use App\Enums\Bank;
+use App\Exceptions\BankApiException;
+use App\Models\BankSession;
+use App\Services\Banks\Contracts\BankDriver;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Http;
+use Throwable;
+
+abstract class AbstractBankDriver implements BankDriver
+{
+    public function __construct(
+        protected readonly Bank $bank,
+        protected readonly BankSession $session,
+    ) {}
+
+    public function bank(): Bank
+    {
+        return $this->bank;
+    }
+
+    public function session(): BankSession
+    {
+        return $this->session;
+    }
+
+    public function ensureAuthenticated(): bool
+    {
+        if ($this->session->isAuthenticated()) {
+            return true;
+        }
+
+        try {
+            return $this->reauthenticate();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    public function logout(): void
+    {
+        //
+    }
+
+    /**
+     * Obtain a fresh access token without user interaction. Returns false when that is impossible.
+     */
+    abstract protected function reauthenticate(): bool;
+
+    /**
+     * Base HTTP client for the bank, without any authorization header.
+     */
+    protected function http(): PendingRequest
+    {
+        $client = Http::baseUrl($this->bank->config('base_url'))
+            ->acceptJson()
+            ->withOptions(['verify' => (bool) $this->bank->config('verify_ssl', true)]);
+
+        $userAgent = $this->bank->config('user_agent');
+
+        return $userAgent ? $client->withUserAgent($userAgent) : $client;
+    }
+
+    /**
+     * HTTP client carrying the session's current access token.
+     */
+    protected function authenticated(): PendingRequest
+    {
+        if ($this->session->access_token === null) {
+            throw new BankApiException('Session is not authenticated.');
+        }
+
+        return $this->http()->withToken($this->session->access_token);
+    }
+
+    /**
+     * Throw a BankApiException carrying the bank's own error message for failed responses.
+     */
+    protected function throwIfFailed(Response $response, ?string $messagePath = null): Response
+    {
+        if ($response->successful()) {
+            return $response;
+        }
+
+        $message = $messagePath !== null ? $response->json($messagePath) : null;
+
+        throw new BankApiException(
+            is_string($message) && $message !== '' ? $message : "{$this->bank->displayName()} request failed with HTTP {$response->status()}.",
+            $response->status(),
+            $response->json(),
+        );
+    }
+
+    /** @param  array<string, mixed>  $meta */
+    protected function rememberMeta(array $meta): void
+    {
+        $this->session->update(['meta' => array_merge($this->session->meta ?? [], $meta)]);
+    }
+
+    protected function meta(string $key, mixed $default = null): mixed
+    {
+        return data_get($this->session->meta, $key, $default);
+    }
+
+    protected function credential(string $key): ?string
+    {
+        return data_get($this->session->credentials, $key);
+    }
+
+    protected function formatAmount(float|int|string $amount, string $currency, int $decimals = 3): string
+    {
+        return number_format((float) $amount, $decimals, '.', ',').' '.$currency;
+    }
+}

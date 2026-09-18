@@ -2,9 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Data\Bank\TransactionData;
 use App\Models\BankSession;
 use App\Models\Transaction;
-use App\Services\BankApiService;
+use App\Services\Banks\Contracts\BankDriver;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,9 +20,7 @@ class CheckTransactionsJob implements ShouldQueue
 
     public function handle(): void
     {
-        $sessions = BankSession::whereNotNull('access_token')
-            ->whereNotNull('refresh_token')
-            ->get();
+        $sessions = BankSession::whereNotNull('access_token')->get();
 
         Log::info('CheckTransactionsJob: started', ['session_count' => $sessions->count()]);
 
@@ -45,27 +44,28 @@ class CheckTransactionsJob implements ShouldQueue
             'chat_id' => $session->telegram_chat_id,
         ]);
 
-        if (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded()) {
+        $driver = $session->driver();
+
+        if (! $driver->ensureAuthenticated()) {
             Log::warning("CheckTransactionsJob: session {$session->id} is not authenticated and could not refresh token, skipping");
 
             return;
         }
 
-        $apiService = new BankApiService($session->bank, $session->device_id, $session->access_token);
-        $accounts = $apiService->getAccounts();
+        $accounts = $driver->accounts();
 
         Log::info("CheckTransactionsJob: session {$session->id} has {$accounts->count()} account(s)");
 
         foreach ($accounts as $account) {
-            $this->processAccount($session, $apiService, $account->number);
+            $this->processAccount($session, $driver, $account->number);
         }
     }
 
-    private function processAccount(BankSession $session, BankApiService $apiService, string $accountNumber): void
+    private function processAccount(BankSession $session, BankDriver $driver, string $accountNumber): void
     {
         Log::info("CheckTransactionsJob: checking account {$accountNumber} for session {$session->id}");
 
-        $transactions = $apiService->getTransactions($accountNumber);
+        $transactions = $driver->transactions($accountNumber);
 
         Log::info("CheckTransactionsJob: fetched {$transactions->count()} transaction(s) for account {$accountNumber}");
 
@@ -108,8 +108,7 @@ class CheckTransactionsJob implements ShouldQueue
                 'transaction_date' => Carbon::parse($txData->date),
             ]);
 
-            // Notify for all events except reversals, and only for recent transactions
-            if (Carbon::parse($txData->date)->isAfter(now()->subHour())) {
+            if ($this->isRecent(Carbon::parse($txData->date))) {
                 Log::info("CheckTransactionsJob: sending notification for transaction {$transaction->id}");
                 $this->sendNotification($session, $transaction);
             } else {
@@ -119,6 +118,19 @@ class CheckTransactionsJob implements ShouldQueue
                 ]);
             }
         }
+    }
+
+    /**
+     * Only recent transactions are worth a notification. Banks that report
+     * dates without a time (midnight) are considered recent for the whole day.
+     */
+    private function isRecent(Carbon $date): bool
+    {
+        if ($date->isAfter(now()->subHour())) {
+            return true;
+        }
+
+        return $date->equalTo($date->copy()->startOfDay()) && $date->greaterThanOrEqualTo(now()->startOfDay());
     }
 
     private function sendNotification(BankSession $session, Transaction $transaction): void
@@ -131,8 +143,9 @@ class CheckTransactionsJob implements ShouldQueue
             return;
         }
 
-        $icon = $transaction->type === 'credit' ? '📥' : '📤';
-        $label = $transaction->type === 'credit' ? 'Received' : 'Sent';
+        $isCredit = $transaction->type === TransactionData::TYPE_CREDIT;
+        $icon = $isCredit ? '📥' : '📤';
+        $label = $isCredit ? 'Received' : 'Sent';
         $counterparty = $transaction->counterparty_name ?? '-';
 
         $message = "{$icon} *New Transaction*\n\n"

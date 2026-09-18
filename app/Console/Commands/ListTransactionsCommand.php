@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Models\BankSession;
 use App\Models\Transaction;
-use App\Services\BankApiService;
 use Illuminate\Console\Command;
 
 class ListTransactionsCommand extends Command
@@ -83,14 +82,15 @@ class ListTransactionsCommand extends Command
             return;
         }
 
-        if (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded()) {
+        $driver = $session->driver();
+
+        if (! $driver->ensureAuthenticated()) {
             $this->error("Session {$sessionId} is not authenticated.");
 
             return;
         }
 
-        $apiService = new BankApiService($session->bank, $session->device_id, $session->access_token);
-        $raw = $apiService->getRawTransactions($account);
+        $raw = $driver->rawTransactions($account);
 
         $this->line(json_encode($raw, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }

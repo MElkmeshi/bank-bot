@@ -3,13 +3,18 @@
 namespace App\Models;
 
 use App\Enums\Bank;
-use App\Services\BankApiService;
-use Carbon\Carbon;
+use App\Services\Banks\BankManager;
+use App\Services\Banks\Contracts\BankDriver;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class BankSession extends Model
 {
+    /** @use HasFactory<\Database\Factories\BankSessionFactory> */
+    use HasFactory;
+
     protected $fillable = [
         'telegram_chat_id',
         'bank',
@@ -21,6 +26,12 @@ class BankSession extends Model
         'refresh_token_expires_at',
         'verification_reference',
         'default_account_number',
+        'credentials',
+        'meta',
+    ];
+
+    protected $hidden = [
+        'credentials',
     ];
 
     public function casts(): array
@@ -29,7 +40,20 @@ class BankSession extends Model
             'bank' => Bank::class,
             'access_token_expires_at' => 'datetime',
             'refresh_token_expires_at' => 'datetime',
+            'credentials' => 'encrypted:array',
+            'meta' => 'array',
         ];
+    }
+
+    /** @param  Builder<BankSession>  $query */
+    public function scopeForChat(Builder $query, int $chatId, Bank $bank): Builder
+    {
+        return $query->where('telegram_chat_id', $chatId)->where('bank', $bank->value);
+    }
+
+    public function driver(): BankDriver
+    {
+        return app(BankManager::class)->forSession($this);
     }
 
     public function isAuthenticated(): bool
@@ -39,41 +63,14 @@ class BankSession extends Model
             && $this->access_token_expires_at->isFuture();
     }
 
-    public function needsTokenRefresh(): bool
+    public function clearTokens(): void
     {
-        return $this->access_token !== null
-            && $this->access_token_expires_at !== null
-            && ! $this->access_token_expires_at->isFuture();
-    }
-
-    /**
-     * Refresh the access token if expired. Returns false if refresh fails or no refresh token exists.
-     */
-    public function refreshTokenIfNeeded(): bool
-    {
-        if (! $this->needsTokenRefresh()) {
-            return true;
-        }
-
-        if (empty($this->refresh_token)) {
-            return false;
-        }
-
-        try {
-            $apiService = new BankApiService($this->bank, $this->device_id);
-            $refreshed = $apiService->refreshToken($this->refresh_token);
-
-            $this->update([
-                'access_token' => $refreshed->access_token,
-                'access_token_expires_at' => Carbon::createFromTimestamp($refreshed->access_token_expires_at),
-            ]);
-
-            $this->refresh();
-
-            return true;
-        } catch (\Throwable) {
-            return false;
-        }
+        $this->update([
+            'access_token' => null,
+            'refresh_token' => null,
+            'access_token_expires_at' => null,
+            'refresh_token_expires_at' => null,
+        ]);
     }
 
     public function transactions(): HasMany

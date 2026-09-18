@@ -3,23 +3,22 @@
 namespace App\Telegram\Handlers;
 
 use App\Enums\Bank;
-use App\Models\BankSession;
-use App\Services\BankApiService;
+use App\Telegram\Concerns\ResolvesBankSession;
 use SergiX44\Nutgram\Nutgram;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 class DeleteDeviceHandler
 {
+    use ResolvesBankSession;
+
     public function __construct(
         private readonly Bank $bank,
     ) {}
 
     public function __invoke(Nutgram $bot): void
     {
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $session = $this->findSession($bot);
 
         if (! $session || ! $session->isAuthenticated()) {
             $bot->sendMessage('You are not authenticated. Please use /start to register.');
@@ -43,26 +42,17 @@ class DeleteDeviceHandler
     {
         $bot->answerCallbackQuery();
 
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $driver = $this->authenticatedDriver($bot, 'Session not found. Please use /start to register.');
 
-        if (! $session || (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded())) {
-            $bot->sendMessage('Session not found. Please use /start to register.');
-
+        if (! $driver) {
             return;
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $apiService->deleteDevice($session->customer_id);
+            $driver->logout();
 
-            $session->update([
-                'access_token' => null,
-                'refresh_token' => null,
-                'access_token_expires_at' => null,
-                'refresh_token_expires_at' => null,
-            ]);
+            $driver->session()->clearTokens();
+            $driver->session()->update(['credentials' => null]);
 
             $bot->sendMessage('✅ Device deleted successfully. Use /start to register again.');
         } catch (\Throwable $e) {

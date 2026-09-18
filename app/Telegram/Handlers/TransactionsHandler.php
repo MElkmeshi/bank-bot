@@ -3,33 +3,32 @@
 namespace App\Telegram\Handlers;
 
 use App\Enums\Bank;
-use App\Models\BankSession;
-use App\Services\BankApiService;
+use App\Services\Banks\Contracts\BankDriver;
+use App\Telegram\Concerns\ResolvesBankSession;
 use SergiX44\Nutgram\Nutgram;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 class TransactionsHandler
 {
+    use ResolvesBankSession;
+
     public function __construct(
         private readonly Bank $bank,
     ) {}
 
     public function __invoke(Nutgram $bot): void
     {
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $driver = $this->authenticatedDriver($bot);
 
-        if (! $session || (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded())) {
-            $bot->sendMessage('You are not authenticated. Please use /start to register.');
-
+        if (! $driver) {
             return;
         }
 
+        $session = $driver->session();
+
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $accounts = $apiService->getAccounts();
+            $accounts = $driver->accounts();
 
             if ($accounts->count() === 0) {
                 $bot->sendMessage('No accounts found.');
@@ -39,12 +38,10 @@ class TransactionsHandler
 
             if ($accounts->count() === 1 && $session->default_account_number === null) {
                 $session->update(['default_account_number' => $accounts->first()->number]);
-                $session->refresh();
             }
 
             if ($accounts->count() === 1 || $session->default_account_number !== null) {
-                $accountNumber = $session->default_account_number ?? $accounts->first()->number;
-                $this->sendTransactions($bot, $apiService, $accountNumber);
+                $this->sendTransactions($bot, $driver, $session->default_account_number ?? $accounts->first()->number);
 
                 return;
             }
@@ -73,30 +70,24 @@ class TransactionsHandler
     {
         $bot->answerCallbackQuery();
 
-        $callbackData = $bot->callbackQuery()->data;
-        [, , $accountNumber] = explode(':', $callbackData, 3);
+        [, , $accountNumber] = explode(':', $bot->callbackQuery()->data, 3);
 
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $driver = $this->authenticatedDriver($bot, 'Session expired. Please use /start to register.');
 
-        if (! $session || (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded())) {
-            $bot->sendMessage('Session expired. Please use /start to register.');
-
+        if (! $driver) {
             return;
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $this->sendTransactions($bot, $apiService, $accountNumber);
+            $this->sendTransactions($bot, $driver, $accountNumber);
         } catch (\Throwable $e) {
             $bot->sendMessage("Failed to fetch transactions: {$e->getMessage()}");
         }
     }
 
-    private function sendTransactions(Nutgram $bot, BankApiService $apiService, string $accountNumber): void
+    private function sendTransactions(Nutgram $bot, BankDriver $driver, string $accountNumber): void
     {
-        $transactions = $apiService->getTransactions($accountNumber);
+        $transactions = $driver->transactions($accountNumber);
 
         if ($transactions->count() === 0) {
             $bot->sendMessage("No transactions found for account `{$accountNumber}`.", parse_mode: 'Markdown');
@@ -107,11 +98,11 @@ class TransactionsHandler
         $lines = ["📊 *Recent Transactions*\nAccount: `{$accountNumber}`\n"];
 
         foreach ($transactions->toCollection()->take(10) as $tx) {
-            $icon = $tx->type === 'credit' ? '📥' : '📤';
+            $icon = $tx->isCredit() ? '📥' : '📤';
             $lines[] = "{$icon} *{$tx->amount_formatted}*"
                 .($tx->counterparty_name !== null ? " — {$tx->counterparty_name}" : '')
                 ."\n_{$tx->code_description}_"
-                .($tx->description !== null ? " · {$tx->description}" : '')
+                .($tx->description !== null && $tx->description !== $tx->code_description ? " · {$tx->description}" : '')
                 ."\n📅 {$tx->date}";
         }
 

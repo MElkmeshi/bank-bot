@@ -3,7 +3,6 @@
 namespace App\Telegram;
 
 use App\Enums\Bank;
-use App\Services\FirebaseService;
 use App\Telegram\Conversations\RegisterConversation;
 use App\Telegram\Conversations\TransferConversation;
 use App\Telegram\Handlers\BalanceHandler;
@@ -15,12 +14,11 @@ class BotKernel
 {
     public static function register(Nutgram $bot, Bank $bank): void
     {
-        $firebaseService = new FirebaseService;
         $balanceHandler = new BalanceHandler($bank);
         $deleteDeviceHandler = new DeleteDeviceHandler($bank);
         $transactionsHandler = new TransactionsHandler($bank);
 
-        $bot->getContainer()->bind(RegisterConversation::class, fn () => new RegisterConversation($bank, $firebaseService));
+        $bot->getContainer()->bind(RegisterConversation::class, fn () => new RegisterConversation($bank));
         $bot->getContainer()->bind(TransferConversation::class, fn () => new TransferConversation($bank));
 
         $bot->onCommand('start', function (Nutgram $bot) {

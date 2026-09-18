@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Captured bank traffic / notes containing real credentials
+/banks

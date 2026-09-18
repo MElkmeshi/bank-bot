@@ -11,7 +11,7 @@ use SergiX44\Nutgram\Nutgram;
 
 class RunBotCommand extends Command
 {
-    protected $signature = 'bot:run {bank : The bank to run the bot for (andalus or nuran)}';
+    protected $signature = 'bot:run {bank : The bank to run the bot for (see config/banks.php)}';
 
     protected $description = 'Run the Telegram bot for a specific bank';
 
@@ -22,7 +22,7 @@ class RunBotCommand extends Command
         $bank = Bank::tryFrom($bankValue);
 
         if ($bank === null) {
-            $this->error("Unknown bank: {$bankValue}. Available banks: andalus, nuran");
+            $this->error("Unknown bank: {$bankValue}. Available banks: ".implode(', ', Bank::values()));
 
             return self::FAILURE;
         }

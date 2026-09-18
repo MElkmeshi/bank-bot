@@ -4,32 +4,31 @@ namespace App\Telegram\Handlers;
 
 use App\Enums\Bank;
 use App\Models\BankSession;
-use App\Services\BankApiService;
+use App\Telegram\Concerns\ResolvesBankSession;
 use SergiX44\Nutgram\Nutgram;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardButton;
 use SergiX44\Nutgram\Telegram\Types\Keyboard\InlineKeyboardMarkup;
 
 class BalanceHandler
 {
+    use ResolvesBankSession;
+
     public function __construct(
         private readonly Bank $bank,
     ) {}
 
     public function __invoke(Nutgram $bot): void
     {
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $driver = $this->authenticatedDriver($bot);
 
-        if (! $session || (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded())) {
-            $bot->sendMessage('You are not authenticated. Please use /start to register.');
-
+        if (! $driver) {
             return;
         }
 
+        $session = $driver->session();
+
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $accounts = $apiService->getAccounts();
+            $accounts = $driver->accounts();
 
             if ($accounts->count() === 0) {
                 $bot->sendMessage('No accounts found.');
@@ -39,13 +38,10 @@ class BalanceHandler
 
             if ($accounts->count() === 1 && $session->default_account_number === null) {
                 $session->update(['default_account_number' => $accounts->first()->number]);
-                $session->refresh();
             }
 
             if ($accounts->count() === 1 || $session->default_account_number !== null) {
-                $account = $session->default_account_number !== null
-                    ? $accounts->toCollection()->firstWhere('number', $session->default_account_number) ?? $accounts->first()
-                    : $accounts->first();
+                $account = $accounts->toCollection()->firstWhere('number', $session->default_account_number) ?? $accounts->first();
 
                 $bot->sendMessage(
                     "💰 *Account Balance*\n\n"
@@ -81,24 +77,16 @@ class BalanceHandler
     {
         $bot->answerCallbackQuery();
 
-        $callbackData = $bot->callbackQuery()->data;
-        [, , $accountNumber] = explode(':', $callbackData, 3);
+        [, , $accountNumber] = explode(':', $bot->callbackQuery()->data, 3);
 
-        $session = BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->first();
+        $driver = $this->authenticatedDriver($bot, 'Session expired. Please use /start to register.');
 
-        if (! $session || (! $session->isAuthenticated() && ! $session->refreshTokenIfNeeded())) {
-            $bot->sendMessage('Session expired. Please use /start to register.');
-
+        if (! $driver) {
             return;
         }
 
         try {
-            $apiService = new BankApiService($this->bank, $session->device_id, $session->access_token);
-            $accounts = $apiService->getAccounts();
-
-            $account = $accounts->toCollection()->firstWhere('number', $accountNumber);
+            $account = $driver->accounts()->toCollection()->firstWhere('number', $accountNumber);
 
             if (! $account) {
                 $bot->sendMessage('Account not found.');
@@ -114,7 +102,7 @@ class BalanceHandler
                     )
                 );
 
-            $isDefault = $session->default_account_number === $accountNumber;
+            $isDefault = $driver->session()->default_account_number === $accountNumber;
             $defaultLabel = $isDefault ? "\n⭐ _This is your default account_" : '';
 
             $bot->sendMessage(
@@ -134,12 +122,9 @@ class BalanceHandler
     {
         $bot->answerCallbackQuery(text: '⭐ Default account updated!');
 
-        $callbackData = $bot->callbackQuery()->data;
-        [, , $accountNumber] = explode(':', $callbackData, 3);
+        [, , $accountNumber] = explode(':', $bot->callbackQuery()->data, 3);
 
-        BankSession::where('telegram_chat_id', $bot->chatId())
-            ->where('bank', $this->bank->value)
-            ->update(['default_account_number' => $accountNumber]);
+        BankSession::forChat($bot->chatId(), $this->bank)->update(['default_account_number' => $accountNumber]);
 
         $bot->sendMessage("⭐ Account `{$accountNumber}` set as your default. Use /balance to check it quickly.", parse_mode: 'Markdown');
     }
