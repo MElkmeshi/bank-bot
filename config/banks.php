@@ -70,6 +70,21 @@ return [
             'proxy' => env('NAB_PROXY'),
         ],
 
+        'atib' => [
+            'name' => 'ATIB',
+            'driver' => 'atib',
+            'cbl_code' => '020',
+            'base_url' => env('ATIB_BASE_URL', 'https://atib-connect.atib.ly:8443'),
+            'telegram_token' => env('ATIB_TELEGRAM_TOKEN'),
+            'auth_service_id' => env('ATIB_AUTH_SERVICE_ID', '100000002'),
+            'app_key' => env('ATIB_APP_KEY', '32f139849b9d44f9e7625fb0f6d151eb'),
+            'app_secret' => env('ATIB_APP_SECRET', '9166e51bb880ccbbb5f25e6015f7bf4d'),
+            'mfa_service_name' => env('ATIB_MFA_SERVICE_NAME', 'SERVICE_ID_67'),
+            'user_agent' => env('ATIB_USER_AGENT', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36'),
+            'transactions_limit' => env('ATIB_TRANSACTIONS_LIMIT', 50),
+            'proxy' => env('ATIB_PROXY'),
+        ],
+
     ],
 
     /*
@@ -87,7 +102,7 @@ return [
         '002' => 'مصرف الجمهورية',
         '005' => 'مصرف الوحدة',
         '007' => 'مصرف شمال أفريقيا',
-        '020' => 'مصرف السراي',
+        '020' => 'مصرف السراي (ATIB)',
         '024' => 'مصرف النوران',
         '027' => 'مصرف الأندلس',
     ],

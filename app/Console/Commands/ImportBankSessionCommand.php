@@ -62,6 +62,7 @@ class ImportBankSessionCommand extends Command
         return match ($bank->driver()) {
             'nab' => ['phone' => $identifier, 'password' => $secret],
             'jumhouria' => ['phone' => $identifier, 'pin' => $secret],
+            'atib' => ['username' => $identifier, 'password' => $secret],
             default => ['identifier' => $identifier, 'secret' => $secret],
         };
     }

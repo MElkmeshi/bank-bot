@@ -1,7 +1,7 @@
 // PM2 process file: one long-polling Telegram bot per bank plus the scheduler
 // that runs transactions:check every minute. Bots whose Telegram token is not
 // configured exit immediately; PM2 keeps them stopped until the token is added.
-const banks = ['andalus', 'nuran', 'jumhouria', 'nab'];
+const banks = ['andalus', 'nuran', 'jumhouria', 'nab', 'atib'];
 
 const app = (name, args) => ({
     name,

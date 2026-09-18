@@ -4,6 +4,7 @@ use App\Enums\Bank;
 use App\Models\BankSession;
 use App\Services\Banks\BankManager;
 use App\Services\Banks\Contracts\BankDriver;
+use App\Services\Banks\Drivers\AtibDriver;
 use App\Services\Banks\Drivers\JumhouriaDriver;
 use App\Services\Banks\Drivers\NabDriver;
 use App\Services\Banks\Drivers\NeptuneDriver;
@@ -21,6 +22,7 @@ it('resolves the configured driver for every bank', function (Bank $bank, string
     'nuran' => [Bank::Nuran, NeptuneDriver::class],
     'jumhouria' => [Bank::Jumhouria, JumhouriaDriver::class],
     'nab' => [Bank::Nab, NabDriver::class],
+    'atib' => [Bank::Atib, AtibDriver::class],
 ]);
 
 it('allows registering custom drivers', function () {

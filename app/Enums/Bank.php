@@ -8,6 +8,7 @@ enum Bank: string
     case Nuran = 'nuran';
     case Jumhouria = 'jumhouria';
     case Nab = 'nab';
+    case Atib = 'atib';
 
     public function config(string $key, mixed $default = null): mixed
     {

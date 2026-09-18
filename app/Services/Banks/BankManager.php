@@ -5,6 +5,7 @@ namespace App\Services\Banks;
 use App\Enums\Bank;
 use App\Models\BankSession;
 use App\Services\Banks\Contracts\BankDriver;
+use App\Services\Banks\Drivers\AtibDriver;
 use App\Services\Banks\Drivers\JumhouriaDriver;
 use App\Services\Banks\Drivers\NabDriver;
 use App\Services\Banks\Drivers\NeptuneDriver;
@@ -25,6 +26,7 @@ class BankManager
         'neptune' => NeptuneDriver::class,
         'jumhouria' => JumhouriaDriver::class,
         'nab' => NabDriver::class,
+        'atib' => AtibDriver::class,
     ];
 
     public function __construct(
