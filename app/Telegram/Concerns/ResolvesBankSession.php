@@ -6,6 +6,7 @@ use App\Enums\Bank;
 use App\Models\BankSession;
 use App\Services\Banks\Contracts\BankDriver;
 use SergiX44\Nutgram\Nutgram;
+use Throwable;
 
 /**
  * Shared lookup of the chat's BankSession for the handler's bank.
@@ -14,6 +15,27 @@ use SergiX44\Nutgram\Nutgram;
  */
 trait ResolvesBankSession
 {
+    /**
+     * Telegram rejects messages longer than 4096 characters.
+     */
+    private const TELEGRAM_MESSAGE_LIMIT = 4096;
+
+    /**
+     * Tell the user what went wrong, with the bank's full error, only cut where Telegram forces it.
+     */
+    protected function sendError(Nutgram $bot, string $context, Throwable $exception, string $advice = ''): void
+    {
+        $message = "❌ {$context}:\n{$exception->getMessage()}";
+        $suffix = $advice !== '' ? "\n\n{$advice}" : '';
+        $limit = self::TELEGRAM_MESSAGE_LIMIT - mb_strlen($suffix) - 1;
+
+        if (mb_strlen($message) > $limit) {
+            $message = mb_substr($message, 0, $limit).'…';
+        }
+
+        $bot->sendMessage($message.$suffix);
+    }
+
     protected function findSession(Nutgram $bot): ?BankSession
     {
         return BankSession::forChat($bot->chatId(), $this->bank)->first();

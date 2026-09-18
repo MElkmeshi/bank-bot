@@ -56,7 +56,7 @@ class DeleteDeviceHandler
 
             $bot->sendMessage('✅ Device deleted successfully. Use /start to register again.');
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to delete device: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to delete device', $e);
         }
     }
 

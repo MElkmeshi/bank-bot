@@ -62,7 +62,7 @@ class TransactionsHandler
                 reply_markup: $keyboard
             );
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to fetch transactions: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to fetch transactions', $e);
         }
     }
 
@@ -81,7 +81,7 @@ class TransactionsHandler
         try {
             $this->sendTransactions($bot, $driver, $accountNumber);
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to fetch transactions: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to fetch transactions', $e);
         }
     }
 

@@ -437,9 +437,10 @@ class JumhouriaDriver extends AbstractBankDriver
 
         if ((int) $response->json('type') !== self::RESPONSE_SUCCESS) {
             $messages = array_filter((array) $response->json('messages', []));
+            $message = $messages !== [] ? implode(' ', $messages) : 'the request was rejected (type '.$response->json('type').')';
 
             throw new BankApiException(
-                $messages !== [] ? implode(' ', $messages) : "{$this->bank->displayName()} rejected the request.",
+                BankApiException::describe($this->bank, $response->status(), $message, $response->json()),
                 $response->status(),
                 $response->json(),
             );

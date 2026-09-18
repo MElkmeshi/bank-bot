@@ -117,7 +117,7 @@ class RegisterConversation extends Conversation
             $bot->sendMessage('⚠️ Device registration is temporarily unavailable. Please try again later with /start');
             $this->end();
         } catch (\Throwable $e) {
-            $bot->sendMessage("Registration failed: {$e->getMessage()}\n\nPlease try again with /start");
+            $this->sendError($bot, 'Registration failed', $e, 'Please try again with /start');
             $this->end();
         }
     }
@@ -146,7 +146,7 @@ class RegisterConversation extends Conversation
 
             $this->finish($bot, $result->customer_name);
         } catch (\Throwable $e) {
-            $bot->sendMessage("Verification failed: {$e->getMessage()}\n\nPlease enter the code again or restart with /start");
+            $this->sendError($bot, 'Verification failed', $e, 'Please enter the code again or restart with /start');
         }
     }
 

@@ -78,7 +78,10 @@ abstract class AbstractBankDriver implements BankDriver
     }
 
     /**
-     * Throw a BankApiException carrying the bank's own error message for failed responses.
+     * Throw a BankApiException carrying the bank's complete error for failed responses.
+     *
+     * The bank's own message (from $messagePath), any field errors and its error
+     * code are all kept, so the user sees exactly what the bank said.
      */
     protected function throwIfFailed(Response $response, ?string $messagePath = null): Response
     {
@@ -86,12 +89,19 @@ abstract class AbstractBankDriver implements BankDriver
             return $response;
         }
 
+        $payload = $response->json();
         $message = $messagePath !== null ? $response->json($messagePath) : null;
 
+        if (! is_string($message) || $message === '') {
+            $message = is_array($payload)
+                ? json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                : trim($response->body());
+        }
+
         throw new BankApiException(
-            is_string($message) && $message !== '' ? $message : "{$this->bank->displayName()} request failed with HTTP {$response->status()}.",
+            BankApiException::describe($this->bank, $response->status(), $message ?: 'empty response', $payload),
             $response->status(),
-            $response->json(),
+            $payload,
         );
     }
 

@@ -69,7 +69,7 @@ class BalanceHandler
                 reply_markup: $keyboard
             );
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to fetch balance: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to fetch balance', $e);
         }
     }
 
@@ -114,7 +114,7 @@ class BalanceHandler
                 reply_markup: $isDefault ? null : $setDefaultButton
             );
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to fetch balance: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to fetch balance', $e);
         }
     }
 

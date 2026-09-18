@@ -107,7 +107,7 @@ class TransferConversation extends Conversation
             );
             $this->next('receiveAccountSelection');
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to load accounts: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to load accounts', $e);
             $this->end();
         }
     }
@@ -166,7 +166,7 @@ class TransferConversation extends Conversation
             );
             $this->next('receiveContactSelection');
         } catch (\Throwable $e) {
-            $bot->sendMessage("Failed to load contacts: {$e->getMessage()}");
+            $this->sendError($bot, 'Failed to load contacts', $e);
             $this->end();
         }
     }
@@ -302,7 +302,7 @@ class TransferConversation extends Conversation
             $bot->sendMessage($summary, parse_mode: 'Markdown', reply_markup: $keyboard);
             $this->next('receiveConfirmation');
         } catch (\Throwable $e) {
-            $bot->sendMessage("Transfer failed: {$e->getMessage()}");
+            $this->sendError($bot, 'Transfer failed', $e);
             $this->end();
         }
     }
@@ -374,7 +374,7 @@ class TransferConversation extends Conversation
             $bot->sendMessage("✅ Transfer completed successfully!{$reference}\n\nUse /balance to check your updated balance.", parse_mode: 'Markdown');
             $this->end();
         } catch (\Throwable $e) {
-            $bot->sendMessage("Transfer confirmation failed: {$e->getMessage()}");
+            $this->sendError($bot, 'Transfer confirmation failed', $e);
             $this->end();
         }
     }

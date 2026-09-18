@@ -193,3 +193,37 @@ it('uses the nuran configuration for nuran sessions', function () {
 
     Http::assertSent(fn (Request $request) => str_starts_with($request->url(), 'https://nuran.test/'));
 });
+
+it('reports the full bank error including field errors and code', function () {
+    Http::fake([
+        'andalus.test/api/v1/register' => Http::response([
+            'message' => 'قد يكون رقم الزبون أو كلمة المرور غير صحيحة !.',
+            'errors' => ['customer_id' => ['رقم الزبون مطلوب'], 'password' => ['كلمة المرور قصيرة']],
+            'data' => [],
+            'code' => 'outdated_version',
+        ], 426),
+        'firebaseinstallations.googleapis.com/*' => Http::response(['fid' => 'fid-123']),
+    ]);
+
+    $driver = BankSession::factory()->create()->driver();
+
+    try {
+        $driver->login('0', 'x');
+        $this->fail('Expected a BankApiException');
+    } catch (BankApiException $e) {
+        expect($e->statusCode)->toBe(426)
+            ->and($e->getMessage())->toBe(
+                "Andalus Bank responded with HTTP 426: قد يكون رقم الزبون أو كلمة المرور غير صحيحة !.\n"
+                ."• customer_id: رقم الزبون مطلوب\n"
+                ."• password: كلمة المرور قصيرة\n"
+                .'(code: outdated_version)'
+            );
+    }
+});
+
+it('falls back to the raw body when the bank sends no message', function () {
+    Http::fake(['andalus.test/api/v1/accounts' => Http::response('<html>Bad Gateway</html>', 502)]);
+
+    expect(fn () => BankSession::factory()->authenticated()->create()->driver()->accounts())
+        ->toThrow(BankApiException::class, 'Andalus Bank responded with HTTP 502: <html>Bad Gateway</html>');
+});
