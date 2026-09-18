@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('transactions:check')->everyMinute();
+Schedule::command('model:prune', ['--model' => [App\Models\BankRequest::class]])->daily();

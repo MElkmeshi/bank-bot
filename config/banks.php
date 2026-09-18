@@ -89,6 +89,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Request log
+    |--------------------------------------------------------------------------
+    |
+    | Every HTTP exchange with a bank is stored in the bank_requests table
+    | (bodies encrypted, secrets redacted) and pruned after retention_days.
+    |
+    */
+
+    'request_log' => [
+        'enabled' => env('BANK_REQUEST_LOG', true),
+        'retention_days' => env('BANK_REQUEST_LOG_RETENTION_DAYS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Institutions
     |--------------------------------------------------------------------------
     |

@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Data\Firebase\FirebaseInstallationData;
 use App\Enums\Bank;
 use App\Exceptions\FirebaseBlockedException;
+use App\Services\Banks\Support\BankRequestRecorder;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 
 class FirebaseService
@@ -24,7 +26,7 @@ class FirebaseService
             'sdkVersion' => 'a:17.0.0',
         ]);
 
-        $response = Http::withHeaders([
+        $response = $this->http($bank)->withHeaders([
             'Content-Type' => 'application/json',
             'x-goog-api-key' => $apiKey,
         ])->post(
@@ -48,7 +50,7 @@ class FirebaseService
     {
         $apiKey = $bank->config('firebase_api_key');
 
-        $response = Http::acceptJson()->post(
+        $response = $this->http($bank)->acceptJson()->post(
             "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={$apiKey}",
             ['returnSecureToken' => true]
         );
@@ -60,5 +62,14 @@ class FirebaseService
         $response->throw();
 
         return $response->json('idToken');
+    }
+
+    private function http(Bank $bank): PendingRequest
+    {
+        $client = Http::createPendingRequest();
+
+        return BankRequestRecorder::enabled()
+            ? $client->withMiddleware((new BankRequestRecorder($bank))->middleware())
+            : $client;
     }
 }

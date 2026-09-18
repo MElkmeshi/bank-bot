@@ -6,6 +6,7 @@ use App\Enums\Bank;
 use App\Exceptions\BankApiException;
 use App\Models\BankSession;
 use App\Services\Banks\Contracts\BankDriver;
+use App\Services\Banks\Support\BankRequestRecorder;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -63,6 +64,10 @@ abstract class AbstractBankDriver implements BankDriver
                 'verify' => (bool) $this->bank->config('verify_ssl', true),
                 'proxy' => $this->bank->config('proxy'),
             ], fn (mixed $option) => $option !== null && $option !== ''));
+
+        if (BankRequestRecorder::enabled()) {
+            $client = $client->withMiddleware((new BankRequestRecorder($this->bank, $this->session))->middleware());
+        }
 
         $userAgent = $this->bank->config('user_agent');
 
