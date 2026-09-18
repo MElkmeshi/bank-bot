@@ -57,7 +57,13 @@ class CheckTransactionsJob implements ShouldQueue
         Log::info("CheckTransactionsJob: session {$session->id} has {$accounts->count()} account(s)");
 
         foreach ($accounts as $account) {
-            $this->processAccount($session, $driver, $account->number);
+            try {
+                $this->processAccount($session, $driver, $account->number);
+            } catch (\Throwable $e) {
+                Log::error("CheckTransactionsJob: failed for account {$account->number} of session {$session->id}", [
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
